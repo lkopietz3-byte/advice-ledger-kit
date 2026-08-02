@@ -1,0 +1,45 @@
+{
+  "name": "advice-ledger-kit",
+  "version": "0.1.0",
+  "description": "Grade the grader: measure whether a recommendation engine's advice was taken and whether it turned out right. Exposure-aligned before/after windows, separate floors per window with machine-readable refusal codes instead of a verdict, symmetric propose/refute thresholds, and a two-judge divergence detector that reports engine-was-right and human-was-right separately. Zero-dependency, domain-agnostic TypeScript.",
+  "keywords": [
+    "recommendation-quality",
+    "calibration",
+    "decision-log",
+    "evaluation",
+    "ab-testing",
+    "honesty",
+    "human-in-the-loop",
+    "drift-detection"
+  ],
+  "license": "MIT",
+  "author": "Lucas Kopietz",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
