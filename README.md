@@ -1,21 +1,40 @@
 # advice-ledger-kit
 
-A tiny, zero-dependency library for grading the grader. Your system makes a
-recommendation, a person accepts or rejects it, and weeks later reality shows
-which of them was right. This library closes that loop honestly: it compares a
-**before** window to an **after** window instead of only tallying what happened
-afterwards, it only lets outcomes where the advice could actually have applied
-create or reverse the headline reading, it holds each window to its own floor,
-and below any floor it hands back **machine-readable refusal codes instead of a
-verdict**. It also ships a second engine for the case where two independent
-judges rate the same thing: it measures how often they disagree, and where a
-later outcome exists, it reports **engine-was-right** and **human-was-right** as
-two separate numbers that are never blended into one "accuracy".
+A tiny, zero-dependency library for grading a recommender against what a
+person did with its advice. Grading a recommendation engine against human
+override is not new — demand planners have called it Forecast Value Added for
+twenty years, and clinical informatics has studied alert-override
+appropriateness for longer. What's usually missing is a version with explicit
+statistical floors, shipped where the person who owns the decision can see it,
+instead of an analysis someone runs quarterly or a metric published only in
+aggregate. This library is that version: it compares a **before** window to an
+**after** window instead of only tallying what happened afterward, it only
+lets outcomes where the advice could actually have applied create or reverse
+the headline reading, it holds each window to its own floor, and below any
+floor it hands back **machine-readable refusal codes instead of a verdict**.
+It also ships a second engine for the case where two independent judges rate
+the same thing: it measures how often they disagree, and where a later
+outcome exists, it reports **engine-was-right** and **human-was-right** as two
+separate numbers that are never blended into one "accuracy".
 
 Domain-agnostic on purpose. A recommendation is `{subjectId, checkKey}`, an
 observation is `good` or `bad`, and everything else is the caller's vocabulary.
 It works the same for maintenance procedures, content-moderation calls,
 code-quality rules, spending suggestions, or health experiments.
+
+**Prior art, named up front.** [Forecast Value Added](https://www.sas.com/en/whitepapers/forecast-value-added-analysis-106186.html)
+(demand planning) grades a human override against a statistical baseline and
+is the closest precedent to API 1; its own published critique is that a
+positive result can be accidental, which is exactly what the floors here are
+for. Alert-override-appropriateness review in clinical decision support
+(e.g. [systematic review, PMC7400042](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7400042/))
+is the closest precedent to API 2, and it typically requires manual chart
+review rather than an automatic, in-the-moment number. Netflix's RecSysOps
+treats a human choosing a low-ranked item as a signal worth investigating,
+which is API 2's divergence case running as internal ops. None of the three
+publish explicit minimum-count floors or return a machine-readable refusal
+code below them — that combination, not the loop itself, is what this library
+adds.
 
 ## The core insight, plainly
 
