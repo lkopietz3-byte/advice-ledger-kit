@@ -138,7 +138,13 @@ function reportFor(
   if (divergent.length < thresholds.minDivergentCount) {
     refusalCodes.push('divergent_count_below_minimum')
   }
-  if (divergentRate === null || divergentRate < thresholds.minDivergentRate) {
+  // The floor is checked against the exact ratio. `divergentRate` is rounded
+  // for display, and 5 of 101 (0.0495) displays as 0.05, which would otherwise
+  // clear a 0.05 floor it does not meet.
+  if (
+    comparable.length === 0 ||
+    divergent.length / comparable.length < thresholds.minDivergentRate
+  ) {
     refusalCodes.push('divergent_rate_below_minimum')
   }
 

@@ -123,6 +123,27 @@ describe('computeDivergence — floors', () => {
     expect(describeDivergence(overall)).toContain('refused')
   })
 
+  it('checks the rate floor against the exact ratio, not the rounded display rate', () => {
+    // 5 of 101 is 0.0495..., which displays as 0.05 after rounding. It is still
+    // below a 0.05 floor and must be refused.
+    const { overall } = computeDivergence([...agree(96), ...overruled(5, 'remove')])
+
+    expect(overall.divergentRate).toBe(0.05)
+    expect(overall.status).toBe('refused')
+    expect(overall.refusalCodes).toEqual(['divergent_rate_below_minimum'])
+  })
+
+  it('reports a rate exactly at the floor', () => {
+    // 5 of 100 is exactly 0.05 and 7 of 100 is exactly 0.07: at the floor passes.
+    expect(computeDivergence([...agree(95), ...overruled(5, 'remove')]).overall.status).toBe(
+      'reportable',
+    )
+    expect(
+      computeDivergence([...agree(93), ...overruled(7, 'remove')], { minDivergentRate: 0.07 })
+        .overall.status,
+    ).toBe('reportable')
+  })
+
   it('rejects a nonsensical rate floor', () => {
     expect(() => resolveDivergenceConfig({ minDivergentRate: 1.5 })).toThrow(RangeError)
     expect(() => resolveDivergenceConfig({ minComparablePairs: 0 })).toThrow(RangeError)
