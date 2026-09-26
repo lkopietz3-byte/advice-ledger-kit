@@ -1,5 +1,18 @@
 # advice-ledger-kit
 
+Compare a person's response to a recommendation with later observed outcomes,
+or measure disagreement between a model and a human judge. The library keeps
+before and after evidence separate, uses exposed after observations for the
+headline grade, and returns refusal codes when evidence floors are unmet.
+These results are evidence-bounded decision support: they do not establish that
+the recommendation was correct or replace human and domain review. The caller
+supplies the observations, exposure flags, outcomes, and floor settings.
+
+**Quick start:** From a clone, run `npm install` and `npm test`, then see
+[`gradeDecision`](#api-1--gradedecisiondecision-recommendation-observations-config)
+or [`computeDivergence`](#api-2--computedivergencepairs-config) for worked
+examples. See [Limits](#limits) before using a verdict in a decision.
+
 A tiny, zero-dependency library for grading a recommender against what a
 person did with its advice. Grading a recommendation engine against human
 override is not new — demand planners have called it Forecast Value Added for
