@@ -1,6 +1,6 @@
 # Engineering contract
 
-## Invariants (each is pinned by tests)
+## Invariants (all but the last are pinned by tests)
 
 - No verdict below a floor. Any unmet floor gives `verdict: 'refused'` with
   every unmet floor code listed; structural codes short-circuit alone.
