@@ -48,6 +48,11 @@ function baseline4of6(): Observation[] {
   ]
 }
 
+/** 'YYYY-MM-DD' for the day `n + 1` days after `DECIDED_AT`, same format as every other date here. */
+function dayAfterDecision(n: number): string {
+  return new Date(Date.UTC(2026, 1, 2 + n)).toISOString().slice(0, 10)
+}
+
 /** `n` post-decision inspections where the procedure was actually performed. */
 function exposedAfter(states: ObservationState[]): Observation[] {
   return states.map((state, i) => obs(`2026-02-${String(i + 2).padStart(2, '0')}`, state, true))
@@ -109,6 +114,21 @@ describe('gradeDecision — verdicts with real before/after rates', () => {
     expect(grade.baseline.observations).toBe(6)
     expect(grade.result.observations).toBe(3)
     expect(grade.verdict).toBe('holding')
+  })
+
+  it('rounds exact halves up in every rate it reports', () => {
+    // 3 bad of 80 is exactly 0.0375. Rounding through binary floating point
+    // gave 0.037; half-up on the exact ratio gives 0.038.
+    const after = Array.from({ length: 80 }, (_, i) =>
+      obs(dayAfterDecision(i), i < 3 ? 'bad' : 'good', true),
+    )
+    const grade = gradeDecision(adopted, recommendation, [...baseline4of6(), ...after], {
+      proposeThreshold: 4,
+    })
+
+    expect(grade.result.badRate).toBe(0.038)
+    expect(grade.secondary.badRate).toBe(0.038)
+    expect(grade.badRateDelta).toBe(-0.629)
   })
 
   it('ignores observations of another subject or another check', () => {

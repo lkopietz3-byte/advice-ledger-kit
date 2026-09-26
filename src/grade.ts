@@ -33,6 +33,7 @@ import type {
   SecondaryReading,
   WindowReading,
 } from './types.js'
+import { difference3, rate, requireCount } from './internal.js'
 
 /** The defaults every unspecified `GradeConfig` field falls back to. */
 export const DEFAULT_GRADE_CONFIG: ResolvedGradeConfig = Object.freeze({
@@ -47,20 +48,6 @@ export const DEFAULT_GRADE_CONFIG: ResolvedGradeConfig = Object.freeze({
 
 const SECONDARY_NOTE =
   'Every post-decision observation, including ones where the recommendation could not have applied. Descriptive only. It cannot create or reverse the headline verdict.'
-
-function requireCount(name: string, value: number, minimum: number): number {
-  if (!Number.isInteger(value) || value < minimum) {
-    throw new RangeError(
-      `advice-ledger-kit: ${name} must be an integer >= ${minimum}, received ${String(value)}`,
-    )
-  }
-  return value
-}
-
-/** Round a ratio to 3 places. `null` on an empty denominator, never NaN. */
-function rate(part: number, whole: number): number | null {
-  return whole > 0 ? Number((part / whole).toFixed(3)) : null
-}
 
 function readWindow(observations: readonly Observation[]): WindowReading {
   const bad = observations.filter((o) => o.state === 'bad').length
@@ -252,7 +239,7 @@ export function gradeDecision(
 
   const badRateDelta =
     result.badRate !== null && baseline.badRate !== null
-      ? Number((result.badRate - baseline.badRate).toFixed(3))
+      ? difference3(result.badRate, baseline.badRate)
       : null
 
   if (refusalCodes.length > 0) {

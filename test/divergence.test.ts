@@ -133,6 +133,14 @@ describe('computeDivergence — floors', () => {
     expect(overall.refusalCodes).toEqual(['divergent_rate_below_minimum'])
   })
 
+  it('rounds exact halves up, the same way for every denominator', () => {
+    // 1 of 80 is 0.0125 and 3 of 80 is 0.0375. Both are exact halves at the
+    // third decimal. Rounding through binary floating point sent the first up
+    // (0.013) and the second down (0.037).
+    expect(computeDivergence([...agree(79), ...overruled(1)]).overall.divergentRate).toBe(0.013)
+    expect(computeDivergence([...agree(77), ...overruled(3)]).overall.divergentRate).toBe(0.038)
+  })
+
   it('reports a rate exactly at the floor', () => {
     // 5 of 100 is exactly 0.05 and 7 of 100 is exactly 0.07: at the floor passes.
     expect(computeDivergence([...agree(95), ...overruled(5, 'remove')]).overall.status).toBe(

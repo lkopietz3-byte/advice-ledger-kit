@@ -30,6 +30,7 @@ import type {
   JudgmentPair,
   ResolvedDivergenceConfig,
 } from './types.js'
+import { rate, requireCount } from './internal.js'
 
 /** The defaults every unspecified `DivergenceConfig` floor falls back to. */
 export const DEFAULT_DIVERGENCE_CONFIG: ResolvedDivergenceConfig = Object.freeze({
@@ -39,19 +40,6 @@ export const DEFAULT_DIVERGENCE_CONFIG: ResolvedDivergenceConfig = Object.freeze
   minResolvedDivergent: 3,
   exampleLimit: 10,
 })
-
-function requireCount(name: string, value: number, minimum: number): number {
-  if (!Number.isInteger(value) || value < minimum) {
-    throw new RangeError(
-      `advice-ledger-kit: ${name} must be an integer >= ${minimum}, received ${String(value)}`,
-    )
-  }
-  return value
-}
-
-function rate(part: number, whole: number): number | null {
-  return whole > 0 ? Number((part / whole).toFixed(3)) : null
-}
 
 const spoke = (judgment: string | undefined): judgment is string =>
   typeof judgment === 'string' && judgment.length > 0
