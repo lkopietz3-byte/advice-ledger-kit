@@ -254,6 +254,21 @@ describe('computeDivergence — grouping', () => {
     expect(result.groups[1]?.divergentCount).toBe(5)
   })
 
+  it('treats undefined from groupBy like null, instead of making a group called undefined', () => {
+    const result = computeDivergence([...agree(15, 'images'), ...overruled(5, 'remove')], {
+      groupBy: (pair) => pair.group as string,
+    })
+
+    expect(result.groups.map((g) => g.group)).toEqual(['images'])
+    expect(result.overall.totalPairs).toBe(20)
+  })
+
+  it('throws when groupBy returns something other than a string, null or undefined', () => {
+    expect(() =>
+      computeDivergence(agree(3), { groupBy: () => 1 as unknown as string }),
+    ).toThrow(/groupBy must return a string or null, received 1/)
+  })
+
   it('leaves a pair out of the breakdown when groupBy returns null', () => {
     const result = computeDivergence([...agree(15, 'images'), ...overruled(5, 'remove')], {
       groupBy: (pair) => pair.group ?? null,

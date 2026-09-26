@@ -30,7 +30,7 @@ import type {
   JudgmentPair,
   ResolvedDivergenceConfig,
 } from './types.js'
-import { rate, requireCount } from './internal.js'
+import { rate, requireCount, shown, typeFail } from './internal.js'
 
 /** The defaults every unspecified `DivergenceConfig` floor falls back to. */
 export const DEFAULT_DIVERGENCE_CONFIG: ResolvedDivergenceConfig = Object.freeze({
@@ -177,8 +177,14 @@ export function computeDivergence(
 
   const buckets = new Map<string, JudgmentPair[]>()
   for (const pair of pairs) {
-    const key = groupBy(pair)
-    if (key === null) continue
+    const key: unknown = groupBy(pair)
+    // undefined is treated like null (a `(p) => p.group` without `?? null`
+    // should not create a group literally keyed undefined). Any other
+    // non-string would collide with its string form once keys are sorted.
+    if (key === null || key === undefined) continue
+    if (typeof key !== 'string') {
+      typeFail(`groupBy must return a string or null, received ${shown(key)}`)
+    }
     const bucket = buckets.get(key)
     if (bucket) bucket.push(pair)
     else buckets.set(key, [pair])

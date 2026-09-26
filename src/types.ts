@@ -287,8 +287,10 @@ export interface DivergenceConfig {
   /** How many divergent pairs to carry through as examples. Default 10. */
   exampleLimit?: number
   /**
-   * Arbitrary caller-supplied bucketing. Return `null` to leave a pair out of
-   * the per-group breakdown entirely. Defaults to the pair's own `group`.
+   * Arbitrary caller-supplied bucketing. Return `null` (or `undefined`) to
+   * leave a pair out of the per-group breakdown; it still counts in `overall`.
+   * Any other non-string return throws a TypeError. Called once per pair.
+   * Defaults to the pair's own `group`.
    */
   groupBy?: (pair: JudgmentPair) => string | null
 }
