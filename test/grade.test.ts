@@ -5,7 +5,13 @@ import {
   gradeDecision,
   resolveGradeConfig,
 } from '../src/grade.js'
-import type { Decision, Observation, ObservationState, Recommendation } from '../src/types.js'
+import type {
+  Decision,
+  GradeConfig,
+  Observation,
+  ObservationState,
+  Recommendation,
+} from '../src/types.js'
 
 // Neutral domain: a fleet-maintenance system recommending a procedure on a
 // pump, and inspections that later report whether the fault recurred.
@@ -260,6 +266,114 @@ describe('gradeDecision — floors return refusal codes, never a verdict', () =>
     })
     expect(strict.verdict).toBe('refused')
     expect(strict.refusalCodes).toEqual(['basis_not_gradeable'])
+  })
+})
+
+describe('gradeDecision — input validation at the boundary', () => {
+  const cleanAfter = exposedAfter(['good', 'good', 'good'])
+  const asObservation = (o: Record<string, unknown>): Observation => o as unknown as Observation
+
+  it('throws on a matching observation whose state is not good or bad, instead of counting it as good', () => {
+    for (const state of ['BAD', undefined, null, '']) {
+      expect(() =>
+        gradeDecision(adopted, recommendation, [
+          ...baseline4of6(),
+          ...cleanAfter,
+          asObservation({ subjectId: SUBJECT, checkKey: CHECK, state, observedAt: '2026-02-09', exposed: true }),
+        ]),
+      ).toThrow(TypeError)
+    }
+    expect(() =>
+      gradeDecision(adopted, recommendation, [
+        ...baseline4of6(),
+        ...cleanAfter,
+        asObservation({ subjectId: SUBJECT, checkKey: CHECK, state: 'BAD', observedAt: '2026-02-09', exposed: true }),
+      ]),
+    ).toThrow(/state must be 'good' or 'bad', received "BAD"/)
+  })
+
+  it('throws on a matching observation with no usable observedAt, instead of parking it at the boundary', () => {
+    for (const observedAt of [undefined, 20260209, '']) {
+      expect(() =>
+        gradeDecision(adopted, recommendation, [
+          ...baseline4of6(),
+          ...cleanAfter,
+          asObservation({ subjectId: SUBJECT, checkKey: CHECK, state: 'bad', observedAt, exposed: true }),
+        ]),
+      ).toThrow(/observedAt must be a non-empty string/)
+    }
+  })
+
+  it('does not validate observations of other subjects or checks, which it never reads', () => {
+    const grade = gradeDecision(adopted, recommendation, [
+      ...baseline4of6(),
+      ...cleanAfter,
+      asObservation({ subjectId: 'pump-99', checkKey: CHECK, state: 'broken' }),
+    ])
+    expect(grade.verdict).toBe('holding')
+  })
+
+  it('throws on a decision with no usable decidedAt, instead of refusing with misleading floor codes', () => {
+    for (const decidedAt of [undefined, '', 20260201]) {
+      expect(() =>
+        gradeDecision(
+          { ...adopted, decidedAt } as unknown as Decision,
+          recommendation,
+          [...baseline4of6(), ...cleanAfter],
+        ),
+      ).toThrow(/decision\.decidedAt must be a non-empty string/)
+    }
+  })
+
+  it('throws on a decision status outside adopted or dismissed', () => {
+    expect(() =>
+      gradeDecision(
+        { ...adopted, status: 'Adopted' } as unknown as Decision,
+        recommendation,
+        [...baseline4of6(), ...cleanAfter],
+      ),
+    ).toThrow(/decision\.status must be 'adopted' or 'dismissed'/)
+  })
+
+  it('throws on an unknown basis, so a typo cannot slip past requireObservedBasis', () => {
+    expect(() =>
+      gradeDecision(
+        adopted,
+        { ...recommendation, basis: 'model_proposed' } as unknown as Recommendation,
+        [...baseline4of6(), ...cleanAfter],
+        { requireObservedBasis: true },
+      ),
+    ).toThrow(/recommendation\.basis must be 'observed' or 'model-proposed'/)
+  })
+
+  it('throws on non-string ids and subject', () => {
+    const rows = [...baseline4of6(), ...cleanAfter]
+    expect(() =>
+      gradeDecision(adopted, { ...recommendation, id: undefined } as unknown as Recommendation, rows),
+    ).toThrow(/recommendation\.id must be a string/)
+    expect(() =>
+      gradeDecision(adopted, { ...recommendation, subjectId: 14 } as unknown as Recommendation, rows),
+    ).toThrow(/recommendation\.subjectId must be a string/)
+    expect(() =>
+      gradeDecision({ ...adopted, recommendationId: undefined } as unknown as Decision, recommendation, rows),
+    ).toThrow(/decision\.recommendationId must be a string/)
+  })
+
+  it('refuses a missing checkKey with no_gradeable_check_key instead of crashing', () => {
+    const grade = gradeDecision(
+      adopted,
+      { ...recommendation, checkKey: undefined } as unknown as Recommendation,
+      [...baseline4of6(), ...cleanAfter],
+    )
+    expect(grade.verdict).toBe('refused')
+    expect(grade.refusalCodes).toEqual(['no_gradeable_check_key'])
+    expect(grade.checkKey).toBe('')
+  })
+
+  it('rejects a non-boolean requireObservedBasis instead of treating the string "false" as true', () => {
+    expect(() =>
+      resolveGradeConfig({ requireObservedBasis: 'false' } as unknown as GradeConfig),
+    ).toThrow(TypeError)
   })
 })
 

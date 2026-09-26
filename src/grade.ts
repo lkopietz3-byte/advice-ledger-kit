@@ -34,7 +34,7 @@ import type {
   SecondaryReading,
   WindowReading,
 } from './types.js'
-import { difference3, rate, requireCount } from './internal.js'
+import { difference3, rate, requireCount, shown, typeFail } from './internal.js'
 
 /** The defaults every unspecified `GradeConfig` field falls back to. */
 export const DEFAULT_GRADE_CONFIG: ResolvedGradeConfig = Object.freeze({
@@ -94,6 +94,10 @@ export function resolveGradeConfig(config: GradeConfig = {}): ResolvedGradeConfi
         'Raise refuteThreshold to at least proposeThreshold, or lower proposeThreshold to match what the proposal really required.',
     )
   }
+  const requireObservedBasis = config.requireObservedBasis ?? d.requireObservedBasis
+  if (typeof requireObservedBasis !== 'boolean') {
+    typeFail(`requireObservedBasis must be a boolean, received ${shown(requireObservedBasis)}`)
+  }
   return {
     minBaselineObservations: requireCount(
       'minBaselineObservations',
@@ -117,7 +121,47 @@ export function resolveGradeConfig(config: GradeConfig = {}): ResolvedGradeConfi
     ),
     proposeThreshold,
     refuteThreshold,
-    requireObservedBasis: config.requireObservedBasis ?? d.requireObservedBasis,
+    requireObservedBasis,
+  }
+}
+
+const BASES: readonly unknown[] = ['observed', 'model-proposed']
+const STATUSES: readonly unknown[] = ['adopted', 'dismissed']
+const STATES: readonly unknown[] = ['good', 'bad']
+
+// TypeScript callers cannot get these wrong, but JavaScript and JSON callers
+// can, and each one used to fail silently: an unknown `state` counted as
+// 'good', a missing date landed in `atBoundaryObservations` or emptied the
+// baseline, and a misspelled `basis` slipped past `requireObservedBasis`.
+function validateLedgerRows(decision: Decision, recommendation: Recommendation): void {
+  if (typeof recommendation.id !== 'string') {
+    typeFail(`recommendation.id must be a string, received ${shown(recommendation.id)}`)
+  }
+  if (typeof recommendation.subjectId !== 'string') {
+    typeFail(`recommendation.subjectId must be a string, received ${shown(recommendation.subjectId)}`)
+  }
+  if (recommendation.basis !== undefined && !BASES.includes(recommendation.basis)) {
+    typeFail(
+      `recommendation.basis must be 'observed' or 'model-proposed' when present, received ${shown(recommendation.basis)}`,
+    )
+  }
+  if (typeof decision.recommendationId !== 'string') {
+    typeFail(`decision.recommendationId must be a string, received ${shown(decision.recommendationId)}`)
+  }
+  if (!STATUSES.includes(decision.status)) {
+    typeFail(`decision.status must be 'adopted' or 'dismissed', received ${shown(decision.status)}`)
+  }
+  if (typeof decision.decidedAt !== 'string' || decision.decidedAt.length === 0) {
+    typeFail(`decision.decidedAt must be a non-empty string, received ${shown(decision.decidedAt)}`)
+  }
+}
+
+function validateObservation(o: Observation, index: number): void {
+  if (!STATES.includes(o.state)) {
+    typeFail(`observations[${index}].state must be 'good' or 'bad', received ${shown(o.state)}`)
+  }
+  if (typeof o.observedAt !== 'string' || o.observedAt.length === 0) {
+    typeFail(`observations[${index}].observedAt must be a non-empty string, received ${shown(o.observedAt)}`)
   }
 }
 
@@ -159,12 +203,15 @@ export function gradeDecision(
   config: GradeConfig = {},
 ): DecisionGrade {
   const thresholds = resolveGradeConfig(config)
+  validateLedgerRows(decision, recommendation)
   const basis: RecommendationBasis = recommendation.basis ?? 'observed'
 
   const base = {
     recommendationId: recommendation.id,
     subjectId: recommendation.subjectId,
-    checkKey: recommendation.checkKey,
+    // Keep the result's declared `string` type true for JavaScript callers
+    // that omit checkKey; that case is refused with no_gradeable_check_key.
+    checkKey: typeof recommendation.checkKey === 'string' ? recommendation.checkKey : '',
     status: decision.status,
     basis,
     decidedAt: decision.decidedAt,
@@ -182,7 +229,9 @@ export function gradeDecision(
   if (decision.recommendationId !== recommendation.id) {
     structural.push('decision_recommendation_mismatch')
   }
-  if (recommendation.checkKey.trim().length === 0) {
+  // A missing or non-string checkKey names no check either.
+  const checkKey: unknown = recommendation.checkKey
+  if (typeof checkKey !== 'string' || checkKey.trim().length === 0) {
     structural.push('no_gradeable_check_key')
   }
   if (thresholds.requireObservedBasis && basis === 'model-proposed') {
@@ -201,9 +250,13 @@ export function gradeDecision(
     }
   }
 
-  const relevant = observations.filter(
-    (o) => o.subjectId === recommendation.subjectId && o.checkKey === recommendation.checkKey,
-  )
+  const relevant: Observation[] = []
+  observations.forEach((o, index) => {
+    if (o.subjectId === recommendation.subjectId && o.checkKey === recommendation.checkKey) {
+      validateObservation(o, index)
+      relevant.push(o)
+    }
+  })
   const before = relevant.filter((o) => o.observedAt < decision.decidedAt)
   const after = relevant.filter((o) => o.observedAt > decision.decidedAt)
   // An observation stamped exactly at the decision is ambiguous: part of that

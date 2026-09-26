@@ -29,3 +29,13 @@ export function rate(part: number, whole: number): number | null {
 export function difference3(a: number, b: number): number {
   return Math.round((a - b) * 1000) / 1000
 }
+
+/** Throw a TypeError with the package prefix. */
+export function typeFail(message: string): never {
+  throw new TypeError(`advice-ledger-kit: ${message}`)
+}
+
+/** Render a received value for an error message: strings quoted, the rest via String(). */
+export function shown(value: unknown): string {
+  return typeof value === 'string' ? JSON.stringify(value) : String(value)
+}
