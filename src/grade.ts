@@ -3,10 +3,11 @@
 // The whole module is one function plus its config resolution. The care is in
 // what it refuses to say:
 //
-//   - It computes a BASELINE from before the decision, not just a tally of
-//     what happened after. "No problems since you adopted this" is not a
-//     result; it is a result only when the baseline shows there were problems
-//     to begin with, and the baseline is what proves that.
+//   - It requires a BASELINE from before the decision with enough
+//     observations and at least one bad one. "No problems since you adopted
+//     this" is only worth grading when there were problems to begin with.
+//     The verdict itself counts bad exposed observations after the decision;
+//     the before/after rate change is reported in `badRateDelta`.
 //
 //   - It applies floors to the baseline window, the post-decision window, and
 //     the exposed post-decision window SEPARATELY, because they fail for
@@ -36,8 +37,12 @@ import type {
 } from './types.js'
 import { difference3, rate, requireCount, shown, typeFail } from './internal.js'
 
-/** The defaults every unspecified `GradeConfig` field falls back to. */
-export const DEFAULT_GRADE_CONFIG: ResolvedGradeConfig = Object.freeze({
+/**
+ * The defaults every unspecified `GradeConfig` field falls back to: 3/3/3
+ * observation floors, 1 bad baseline observation, propose and refute bars of
+ * 2, and `requireObservedBasis: false`. Frozen.
+ */
+export const DEFAULT_GRADE_CONFIG: Readonly<ResolvedGradeConfig> = Object.freeze({
   minBaselineObservations: 3,
   minResultObservations: 3,
   minExposedResultObservations: 3,
@@ -67,13 +72,17 @@ const emptyWindow = (): WindowReading => ({ observations: 0, bad: 0, good: 0, ba
  * direction.
  *
  * `refuteThreshold` defaults to `proposeThreshold`, so the out-of-the-box
- * behaviour is symmetric. A caller may raise it (harder to overturn a
+ * behavior is symmetric. A caller may raise it (harder to overturn a
  * decision) but never lower it: needing less evidence to condemn advice than
- * it took to offer the advice guarantees that, over time, everything the
- * system ever recommends eventually reads as failing.
+ * it took to offer it biases the grade toward "not holding".
  *
- * @throws RangeError when `refuteThreshold < proposeThreshold`, or when any
- *   count is not a non-negative integer.
+ * `null` and `undefined` fields fall back to the defaults. Returns a new
+ * object; the input is not modified.
+ *
+ * @throws RangeError when `refuteThreshold < proposeThreshold`, when
+ *   `minBaselineBadObservations` is not an integer >= 0, or when any other
+ *   count is not an integer >= 1 (NaN and Infinity included).
+ * @throws TypeError when `requireObservedBasis` is present and not a boolean.
  */
 export function resolveGradeConfig(config: GradeConfig = {}): ResolvedGradeConfig {
   const d = DEFAULT_GRADE_CONFIG
@@ -187,14 +196,29 @@ function secondaryFrom(window: WindowReading, wouldBeVerdict: DecisionVerdict): 
  *   dismissed + the problem came back    -> 'not-holding'  (the evidence sided with the advice)
  *
  * "The problem came back" means at least `refuteThreshold` bad observations in
- * the exposed post-decision window. Anything short of every floor being met
- * returns 'refused' with the specific codes attached, and no verdict at all.
+ * the exposed post-decision window. It is a count, not a rate: 'holding' does
+ * not mean the bad rate went down (see `badRateDelta`), and because the
+ * post-decision window is every observation you pass, a long enough window
+ * with any recurrence rate will eventually reach the bar. Pass a bounded
+ * window if that matters. Anything short of every floor being met returns
+ * 'refused' with the specific codes attached, and no verdict at all.
+ *
+ * Pure: reads its inputs, never modifies them, and gives the same result for
+ * any order of `observations`. Observations are not deduplicated.
  *
  * @param decision - the human's call. Its `recommendationId` must match `recommendation.id`.
  * @param recommendation - the advice being graded.
  * @param observations - every observation available; this function does the
- *   filtering by `subjectId` and `checkKey` itself, so passing the whole log is fine.
+ *   filtering by `subjectId` and `checkKey` (exact equality) itself, so passing
+ *   the whole log is fine. Only matching observations are read and validated.
  * @param config - floors and thresholds. See `resolveGradeConfig`.
+ * @throws RangeError or TypeError from `resolveGradeConfig`.
+ * @throws TypeError when `recommendation.id`, `recommendation.subjectId` or
+ *   `decision.recommendationId` is not a string, `recommendation.basis` is
+ *   present and not 'observed' or 'model-proposed', `decision.status` is not
+ *   'adopted' or 'dismissed', `decision.decidedAt` is not a non-empty string,
+ *   or a matching observation has a `state` other than 'good'/'bad' or an
+ *   empty or non-string `observedAt`.
  */
 export function gradeDecision(
   decision: Decision,
@@ -340,10 +364,13 @@ export function gradeDecision(
 }
 
 /**
- * Render a grade as one plain sentence, counts first.
+ * Render a grade as one plain sentence.
  *
- * Deliberately says nothing a caller could mistake for a causal claim, and
- * names the refusal codes verbatim rather than smoothing them into prose.
+ * A verdict reads "Holding: <check> on <subject> was bad in B of N
+ * observations before and b of n exposed observations since the
+ * recommendation was <status> on <decidedAt>." A refusal reads "Refused to
+ * grade <check> on <subject>: <codes>." with the codes verbatim. Makes no
+ * causal claim.
  */
 export function describeGrade(grade: DecisionGrade): string {
   const where = `${grade.checkKey} on ${grade.subjectId}`

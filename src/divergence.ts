@@ -2,11 +2,10 @@
 // disagree, and where a later outcome exists, who turned out right.
 //
 // The premise: two judges of the same thing are most informative when they
-// DISAGREE. Agreement is cheap and mostly uninformative; disagreement is the
-// only place either judge can be shown to be wrong. Most systems that have two
-// judges available never compute the disagreement at all — they store the
-// engine's rating, store the human's override, and never put the two side by
-// side.
+// DISAGREE. When they agree, a later outcome cannot tell them apart; a
+// disagreement is where one of them can be shown to be wrong. It is common to
+// store the engine's rating and the human's override and never put the two
+// side by side.
 //
 // Two disciplines make the number safe to act on:
 //
@@ -32,8 +31,12 @@ import type {
 } from './types.js'
 import { rate, requireCount, shown, typeFail } from './internal.js'
 
-/** The defaults every unspecified `DivergenceConfig` floor falls back to. */
-export const DEFAULT_DIVERGENCE_CONFIG: ResolvedDivergenceConfig = Object.freeze({
+/**
+ * The defaults every unspecified `DivergenceConfig` floor falls back to: 10
+ * comparable pairs, 3 disagreements, a 0.05 disagreement rate, 3 settled
+ * disagreements, and 10 examples. Frozen.
+ */
+export const DEFAULT_DIVERGENCE_CONFIG: Readonly<ResolvedDivergenceConfig> = Object.freeze({
   minComparablePairs: 10,
   minDivergentCount: 3,
   minDivergentRate: 0.05,
@@ -44,7 +47,14 @@ export const DEFAULT_DIVERGENCE_CONFIG: ResolvedDivergenceConfig = Object.freeze
 const spoke = (judgment: string | undefined): judgment is string =>
   typeof judgment === 'string' && judgment.length > 0
 
-/** Fill in defaults and reject nonsensical floors. */
+/**
+ * Fill in defaults and reject nonsensical floors. `null` and `undefined`
+ * fields fall back to the defaults. `groupBy` is not part of the result.
+ *
+ * @throws RangeError when `minDivergentRate` is not a finite number in
+ *   [0, 1], `exampleLimit` is not an integer >= 0, or any other count is not
+ *   an integer >= 1.
+ */
 export function resolveDivergenceConfig(config: DivergenceConfig = {}): ResolvedDivergenceConfig {
   const d = DEFAULT_DIVERGENCE_CONFIG
   const minDivergentRate = config.minDivergentRate ?? d.minDivergentRate
@@ -165,8 +175,15 @@ function reportFor(
  * legitimately have reportable divergence and refused calibration: plenty of
  * disagreements, not enough of them settled yet.
  *
+ * Counts do not depend on input order. `examples` keep input order and are
+ * your own pair objects, not copies. Pairs are not deduplicated, even when
+ * they share an `id`. Inputs are never modified.
+ *
  * @param pairs - every occasion both judges could have spoken on.
  * @param config - floors and the optional `groupBy`. See `resolveDivergenceConfig`.
+ * @throws RangeError from `resolveDivergenceConfig`.
+ * @throws TypeError when `groupBy` returns something other than a string,
+ *   `null` or `undefined`.
  */
 export function computeDivergence(
   pairs: readonly JudgmentPair[],
@@ -204,8 +221,10 @@ export function computeDivergence(
 /**
  * Render a divergence report as one plain sentence.
  *
- * Never merges the two hit rates, and says "refused" out loud rather than
- * quietly printing a number that did not clear its floor.
+ * A refused report says "refused to report divergence (<codes>)" and gives
+ * the raw counts. A reportable report gives the disagreement count, then
+ * either why calibration is withheld or the engine-right and human-right
+ * counts as two separate numbers. Never prints a blended accuracy.
  */
 export function describeDivergence(report: DivergenceReport): string {
   const where = report.group === null ? 'Overall' : `Group ${report.group}`
