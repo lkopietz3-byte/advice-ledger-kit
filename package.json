@@ -1,16 +1,17 @@
 {
   "name": "advice-ledger-kit",
   "version": "0.1.0",
-  "description": "Grade the grader: measure whether a recommendation engine's advice was taken and whether it turned out right. Exposure-aligned before/after windows, separate floors per window with machine-readable refusal codes instead of a verdict, symmetric propose/refute thresholds, and a two-judge divergence detector that reports engine-was-right and human-was-right separately. Zero-dependency, domain-agnostic TypeScript.",
+  "description": "Grade decisions on a recommender's advice against later observations, refusing with machine-readable codes when before/after or exposure floors are not met, and measure engine-versus-human disagreement with engine-right and human-right counts kept separate.",
   "keywords": [
-    "recommendation-quality",
-    "calibration",
+    "recommendation-evaluation",
     "decision-log",
-    "evaluation",
-    "ab-testing",
-    "honesty",
     "human-in-the-loop",
-    "drift-detection"
+    "human-override",
+    "before-after",
+    "exposure-alignment",
+    "inter-rater-disagreement",
+    "refusal-codes",
+    "typescript"
   ],
   "author": "Lucas Kopietz",
   "license": "MIT",

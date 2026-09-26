@@ -35,9 +35,10 @@ needs to be readable by you):
 npm install github:lkopietz3-byte/advice-ledger-kit
 ```
 
-The package builds itself on install through its `prepare` script. It is
-ESM only, has no runtime dependencies, ships TypeScript declarations, and
-needs Node 20 or later.
+The package builds itself on install through its `prepare` script. Recent
+npm versions may warn that `prepare` is not covered by `allowScripts`; with
+npm 11.16 the build still ran. It is ESM only, has no runtime dependencies,
+ships TypeScript declarations, and needs Node 20 or later.
 
 ## Quickstart
 

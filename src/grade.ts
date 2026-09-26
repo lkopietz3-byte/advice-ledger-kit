@@ -15,7 +15,7 @@
 //
 //   - It aligns exposure: only observations where the advice could actually
 //     have applied are allowed to create or reverse the headline verdict. The
-//     unaligned reading is still computed, but it is labelled as secondary and
+//     unaligned reading is still computed, but it is labeled as secondary and
 //     structurally cannot become the headline.
 //
 //   - Its refute bar is symmetric with its propose bar by default. A grader
