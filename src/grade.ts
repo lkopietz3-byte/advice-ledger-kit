@@ -352,9 +352,9 @@ export function describeGrade(grade: DecisionGrade): string {
   }
   const b = grade.baseline
   const r = grade.result
-  const window = `bad in ${b.bad} of ${b.observations} before, ${r.bad} of ${r.observations} since`
-  const call = grade.status === 'adopted' ? 'adopted' : 'dismissed'
-  return grade.verdict === 'holding'
-    ? `Holding: ${where} was ${window} the recommendation was ${call} on ${grade.decidedAt}.`
-    : `Not holding: ${where} was ${window} the recommendation was ${call} on ${grade.decidedAt}.`
+  // "exposed" matters: `result` counts only exposed post-decision
+  // observations, and calling that "since" would hide the unexposed ones.
+  const window = `bad in ${b.bad} of ${b.observations} observations before and ${r.bad} of ${r.observations} exposed observations since`
+  const label = grade.verdict === 'holding' ? 'Holding' : 'Not holding'
+  return `${label}: ${where} was ${window} the recommendation was ${grade.status} on ${grade.decidedAt}.`
 }

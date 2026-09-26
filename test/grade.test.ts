@@ -78,7 +78,9 @@ describe('gradeDecision — verdicts with real before/after rates', () => {
     expect(grade.result).toEqual({ observations: 5, bad: 0, good: 5, badRate: 0 })
     expect(grade.badRateDelta).toBe(-0.667)
     expect(grade.interpretation).toBe('association_not_causation')
-    expect(describeGrade(grade)).toContain('bad in 4 of 6 before, 0 of 5 since')
+    expect(describeGrade(grade)).toBe(
+      'Holding: seal-leak on pump-14 was bad in 4 of 6 observations before and 0 of 5 exposed observations since the recommendation was adopted on 2026-02-01.',
+    )
   })
 
   it('returns not-holding when the fault recurs at the refute bar', () => {
@@ -400,6 +402,9 @@ describe('gradeDecision — exposure alignment', () => {
     expect(grade.secondary).toMatchObject({ observations: 5, bad: 2, badRate: 0.4 })
     expect(grade.secondary.wouldBeVerdict).toBe('not-holding')
     expect(grade.secondary.interpretation).toBe('exposure_unaligned_descriptive_only')
+
+    // The sentence must not present the exposed count as everything since.
+    expect(describeGrade(grade)).toContain('0 of 3 exposed observations since')
   })
 
   it('says the exposure-blind grade would also refuse when its floors fail', () => {
