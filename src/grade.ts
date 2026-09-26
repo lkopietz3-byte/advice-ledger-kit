@@ -24,6 +24,7 @@
 import type {
   Decision,
   DecisionGrade,
+  DecisionVerdict,
   GradeConfig,
   GradeRefusalCode,
   Observation,
@@ -120,11 +121,11 @@ export function resolveGradeConfig(config: GradeConfig = {}): ResolvedGradeConfi
   }
 }
 
-function secondaryFrom(window: WindowReading, refuteThreshold: number): SecondaryReading {
+function secondaryFrom(window: WindowReading, wouldBeVerdict: DecisionVerdict): SecondaryReading {
   return {
     label: 'secondary-not-the-headline',
     ...window,
-    wouldBeVerdict: window.bad >= refuteThreshold ? 'not-holding' : 'holding',
+    wouldBeVerdict,
     interpretation: 'exposure_unaligned_descriptive_only',
     note: SECONDARY_NOTE,
   }
@@ -195,7 +196,7 @@ export function gradeDecision(
       baseline: emptyWindow(),
       result: emptyWindow(),
       badRateDelta: null,
-      secondary: secondaryFrom(emptyWindow(), thresholds.refuteThreshold),
+      secondary: secondaryFrom(emptyWindow(), 'refused'),
       atBoundaryObservations: 0,
     }
   }
@@ -218,7 +219,25 @@ export function gradeDecision(
 
   const baseline = readWindow(before)
   const result = readWindow(exposedAfter)
-  const secondary = secondaryFrom(readWindow(after), thresholds.refuteThreshold)
+  const unaligned = readWindow(after)
+
+  // What the same grader would say with exposure ignored: every post-decision
+  // observation counts as exposed, and every floor still applies. A grader
+  // that ignores exposure but keeps its floors would refuse here too, so the
+  // would-be verdict is 'refused', never a 'holding' read off an empty window.
+  const unalignedRefused =
+    baseline.observations < thresholds.minBaselineObservations ||
+    baseline.bad < thresholds.minBaselineBadObservations ||
+    after.length < thresholds.minResultObservations ||
+    after.length < thresholds.minExposedResultObservations
+  const secondary = secondaryFrom(
+    unaligned,
+    unalignedRefused
+      ? 'refused'
+      : unaligned.bad >= thresholds.refuteThreshold
+        ? 'not-holding'
+        : 'holding',
+  )
 
   const refusalCodes: GradeRefusalCode[] = []
   if (baseline.observations < thresholds.minBaselineObservations) {

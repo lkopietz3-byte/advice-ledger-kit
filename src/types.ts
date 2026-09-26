@@ -195,8 +195,13 @@ export interface WindowReading {
  */
 export interface SecondaryReading extends WindowReading {
   label: 'secondary-not-the-headline'
-  /** What the verdict WOULD have been if exposure were ignored. */
-  wouldBeVerdict: 'holding' | 'not-holding'
+  /**
+   * What the verdict would have been if exposure were ignored: the same
+   * floors and refute bar, applied with every post-decision observation
+   * treated as exposed. 'refused' when that exposure-blind grade would also
+   * fail a floor, and on every structural refusal.
+   */
+  wouldBeVerdict: DecisionVerdict
   interpretation: 'exposure_unaligned_descriptive_only'
   note: string
 }

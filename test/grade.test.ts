@@ -288,6 +288,55 @@ describe('gradeDecision — exposure alignment', () => {
     expect(grade.secondary.interpretation).toBe('exposure_unaligned_descriptive_only')
   })
 
+  it('says the exposure-blind grade would also refuse when its floors fail', () => {
+    // No post-decision observations at all. Ignoring exposure changes nothing,
+    // so the would-be verdict is a refusal, not 'holding'.
+    const noAfter = gradeDecision(adopted, recommendation, baseline4of6())
+    expect(noAfter.verdict).toBe('refused')
+    expect(noAfter.secondary.wouldBeVerdict).toBe('refused')
+
+    // Thin baseline: the exposure-blind grader has the same baseline floor.
+    const thinBaseline = gradeDecision(adopted, recommendation, [
+      obs('2026-01-02', 'bad'),
+      obs('2026-02-02', 'bad', false),
+      obs('2026-02-03', 'bad', false),
+      obs('2026-02-04', 'bad', false),
+    ])
+    expect(thinBaseline.secondary.wouldBeVerdict).toBe('refused')
+
+    // A structural refusal has no window to read at all.
+    const mismatch = gradeDecision(
+      { ...adopted, recommendationId: 'rec-other' },
+      recommendation,
+      [...baseline4of6(), ...exposedAfter(['good', 'good', 'good'])],
+    )
+    expect(mismatch.secondary.wouldBeVerdict).toBe('refused')
+  })
+
+  it('gives the exposure-blind verdict when only the exposed floor fails', () => {
+    const grade = gradeDecision(adopted, recommendation, [
+      ...baseline4of6(),
+      obs('2026-02-02', 'bad', false),
+      obs('2026-02-03', 'bad', false),
+      obs('2026-02-04', 'good', true),
+    ])
+    expect(grade.refusalCodes).toEqual(['exposed_result_below_minimum'])
+    expect(grade.secondary.wouldBeVerdict).toBe('not-holding')
+  })
+
+  it('applies the exposed floor to the exposure-blind window too', () => {
+    // With exposure ignored, every post-decision observation counts as
+    // exposed, so a raised exposed floor applies to all of them.
+    const grade = gradeDecision(
+      adopted,
+      recommendation,
+      [...baseline4of6(), ...exposedAfter(['good', 'good', 'good', 'good'])],
+      { minExposedResultObservations: 5 },
+    )
+    expect(grade.refusalCodes).toEqual(['exposed_result_below_minimum'])
+    expect(grade.secondary.wouldBeVerdict).toBe('refused')
+  })
+
   it('treats an omitted exposed flag as not-exposed, never as exposed', () => {
     const grade = gradeDecision(adopted, recommendation, [
       ...baseline4of6(),
