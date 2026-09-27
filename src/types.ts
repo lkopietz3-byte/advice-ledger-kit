@@ -1,9 +1,8 @@
 // Core types for advice-ledger-kit.
 //
 // The pattern: a system makes a recommendation, a human accepts or rejects it,
-// and reality later shows who was right. Almost every recommender records the
-// first two events and then never closes the loop on the third. The advice
-// scrolls away, the decision is forgotten, and nobody ever measures whether
+// and reality later shows who was right. It is common to record the first two
+// events and never close the loop on the third, so nobody measures whether
 // the advice was any good.
 //
 // Two failure modes show up when systems DO try to close the loop:
@@ -18,14 +17,14 @@
 //      Advice gets blamed (or credited) for what happened while it was on the
 //      shelf.
 //
-// This library refuses both. It compares a BEFORE window to an AFTER window,
-// it only lets outcomes where the advice could actually apply create or
-// reverse the headline reading, it enforces floors on each window separately,
-// and below any floor it returns machine-readable refusal codes instead of a
-// verdict.
+// This library guards against both. It will not grade without a BEFORE window
+// that has enough observations and at least one bad one, it only lets
+// outcomes where the advice could actually apply create or reverse the
+// headline reading, it enforces floors on each window separately, and below
+// any floor it returns machine-readable refusal codes instead of a verdict.
 //
-// Dates are compared as strings, so use one consistent ISO-8601 format for
-// every `proposedAt`, `decidedAt`, and `observedAt` in a given ledger. Mixing
+// Dates are compared as strings, so use one consistent ISO-8601 format and one
+// UTC offset for every `decidedAt` and `observedAt` in a given ledger. Mixing
 // 'YYYY-MM-DD' with 'YYYY-MM-DDTHH:mm:ssZ' compares wrongly, because
 // '2026-01-01' sorts before '2026-01-01T00:00:00Z'.
 
@@ -54,9 +53,11 @@ export interface Recommendation {
    * The thing later observations report on. This is what makes a
    * recommendation gradeable at all: without a check key, no observation can
    * be matched back to the advice, and this library refuses rather than
-   * guessing. An empty `checkKey` is always a refusal.
+   * guessing. An empty or whitespace-only `checkKey` is always a refusal.
+   * Matched against `Observation.checkKey` by exact string equality.
    */
   checkKey: string
+  /** When the advice was made. Carried for your records; `gradeDecision` does not read it. */
   proposedAt: string
   /** Defaults to 'observed' when omitted. */
   basis?: RecommendationBasis
@@ -67,19 +68,34 @@ export type DecisionStatus = 'adopted' | 'dismissed'
 
 /** The human's call on one recommendation, at a point in time. */
 export interface Decision {
+  /** Must equal `Recommendation.id`, or the grade is refused. */
   recommendationId: string
   status: DecisionStatus
+  /**
+   * When the call was made. Observations strictly before it form the
+   * baseline, strictly after it the result; equal ones grade neither window.
+   * Must be a non-empty string.
+   */
   decidedAt: string
 }
 
 /** What an observation found: the thing was fine, or it was not. */
 export type ObservationState = 'good' | 'bad'
 
-/** One dated reading of one check on one subject. */
+/**
+ * One dated reading of one check on one subject.
+ *
+ * There is no observation id and no deduplication: two identical rows count
+ * as two readings.
+ */
 export interface Observation {
+  /** Matched against `Recommendation.subjectId` by exact string equality. */
   subjectId: string
+  /** Matched against `Recommendation.checkKey` by exact string equality. */
   checkKey: string
+  /** Anything other than 'good' or 'bad' on a matching observation throws a TypeError. */
   state: ObservationState
+  /** Compared to `decidedAt` as a string. Must be non-empty on a matching observation. */
   observedAt: string
   /**
    * Whether the recommendation could actually have applied on this occasion.
@@ -101,10 +117,23 @@ export interface Observation {
 // ---------------------------------------------------------------------------
 
 /**
- * 'holding'     — later evidence is consistent with the decision having been right.
- * 'not-holding' — later evidence went against the decision, at the refute bar.
- * 'refused'     — the evidence does not reach the bar for any verdict at all.
- *                 Read `refusalCodes` for exactly which floor was not met.
+ * 'holding'     — every floor is met, the exposed post-decision window has
+ *                 fewer than `refuteThreshold` bad observations, AND its bad
+ *                 rate is not higher than the baseline's.
+ * 'not-holding' — every floor is met and EITHER the exposed post-decision
+ *                 window has at least `refuteThreshold` bad observations, OR
+ *                 its bad rate is higher than the baseline's, even below
+ *                 that count (1 of 10 before, 1 of 3 exposed since is
+ *                 `not-holding`, not `holding`, despite the count staying
+ *                 under the default bar of 2).
+ * 'refused'     — a floor or a structural check failed. Read `refusalCodes`.
+ *
+ * The rate comparison is exact: it cross-multiplies the raw counts
+ * (`result.bad * baseline.observations` against
+ * `baseline.bad * result.observations`) rather than comparing the rounded
+ * `badRate` fields or the sign of `badRateDelta`. Two rates can display the
+ * same 3-place `badRate` while differing underneath, and the verdict follows
+ * the exact comparison, not the display, right at that boundary.
  */
 export type DecisionVerdict = 'holding' | 'not-holding' | 'refused'
 
@@ -114,22 +143,30 @@ export type DecisionVerdict = 'holding' | 'not-holding' | 'refused'
  * tell the user what would fix it.
  */
 export type GradeRefusalCode =
-  /** Not enough pre-decision observations to establish what normal looked like. */
+  /** Floor: fewer pre-decision observations than `minBaselineObservations`. */
   | 'baseline_below_minimum'
-  /** Not enough post-decision observations of any kind. */
+  /** Floor: fewer post-decision observations (exposed or not) than `minResultObservations`. */
   | 'result_below_minimum'
-  /** Post-decision observations exist, but too few where the advice could apply. */
+  /**
+   * Floor: fewer exposed post-decision observations than
+   * `minExposedResultObservations`. Fires whether or not any unexposed
+   * post-decision observations exist.
+   */
   | 'exposed_result_below_minimum'
   /**
-   * The baseline shows the problem was never occurring. Its absence afterwards
-   * is therefore not evidence the advice did anything.
+   * Floor: fewer bad pre-decision observations than
+   * `minBaselineBadObservations`. With a full baseline this means the problem
+   * was not occurring (often enough) before the decision, so its absence
+   * afterward is not evidence the advice did anything. An empty baseline
+   * also triggers it (whenever this floor is 1 or more), alongside
+   * 'baseline_below_minimum'.
    */
   | 'baseline_lacks_negative_signal'
-  /** The recommendation names no check, so no observation can be matched to it. */
+  /** Structural: the recommendation's `checkKey` is empty, whitespace-only, or not a string. */
   | 'no_gradeable_check_key'
-  /** `requireObservedBasis` is on and this recommendation came from a model. */
+  /** Structural: `requireObservedBasis` is on and the basis is 'model-proposed'. */
   | 'basis_not_gradeable'
-  /** `decision.recommendationId` does not match `recommendation.id`. */
+  /** Structural: `decision.recommendationId` does not equal `recommendation.id`. */
   | 'decision_recommendation_mismatch'
 
 /** Caller-supplied floors and thresholds. Every field has a default. */
@@ -162,7 +199,7 @@ export interface GradeConfig {
    * README section "Why asymmetry in the wrong direction is a bug".
    */
   refuteThreshold?: number
-  /** When true, a 'model-proposed' recommendation is refused. Default false. */
+  /** When true, a 'model-proposed' recommendation is refused. Default false. Must be a boolean. */
   requireObservedBasis?: boolean
 }
 
@@ -182,7 +219,7 @@ export interface WindowReading {
   observations: number
   bad: number
   good: number
-  /** `bad / observations`, rounded to 3 places. `null` on an empty window. */
+  /** `bad / observations`, rounded to 3 places (exact halves up). `null` on an empty window. */
   badRate: number | null
 }
 
@@ -195,16 +232,34 @@ export interface WindowReading {
  */
 export interface SecondaryReading extends WindowReading {
   label: 'secondary-not-the-headline'
-  /** What the verdict WOULD have been if exposure were ignored. */
-  wouldBeVerdict: 'holding' | 'not-holding'
+  /**
+   * What the verdict would have been if exposure were ignored: the same
+   * floors, refute bar and baseline-rate check, applied with every
+   * post-decision observation treated as exposed. 'refused' when that
+   * exposure-blind grade would also fail a floor, and on every structural
+   * refusal.
+   */
+  wouldBeVerdict: DecisionVerdict
   interpretation: 'exposure_unaligned_descriptive_only'
   note: string
 }
 
-/** The result of grading one decision against what happened afterwards. */
+/**
+ * The result of grading one decision against what happened afterwards.
+ *
+ * On a floor refusal the windows hold real counts. On a structural refusal
+ * ('decision_recommendation_mismatch', 'no_gradeable_check_key',
+ * 'basis_not_gradeable') nothing is read: `baseline`, `result` and
+ * `secondary` are all-zero placeholders with null rates, and
+ * `atBoundaryObservations` is 0. Those zeros are not measurements.
+ */
 export interface DecisionGrade {
   verdict: DecisionVerdict
-  /** Empty when a verdict was reached. Never empty when `verdict` is 'refused'. */
+  /**
+   * Empty when a verdict was reached. Never empty when `verdict` is 'refused'.
+   * Structural codes short-circuit and appear without floor codes; floor codes
+   * accumulate, every unmet floor listed.
+   */
   refusalCodes: GradeRefusalCode[]
   recommendationId: string
   subjectId: string
@@ -219,7 +274,14 @@ export interface DecisionGrade {
    * and only those.
    */
   result: WindowReading
-  /** `result.badRate - baseline.badRate`. Negative means the rate went down. */
+  /**
+   * `result.badRate - baseline.badRate`, using the two rounded rates shown, so
+   * it can differ from the unrounded difference by up to 0.001. Negative means
+   * the rate went down. `null` when either window is empty. This is a display
+   * value only: the verdict's own rate check (see `DecisionVerdict`) compares
+   * the exact unrounded counts, so a grade can be `'not-holding'` on a rate
+   * increase while `badRateDelta` shows 0 or even a small negative number.
+   */
   badRateDelta: number | null
   /** All post-decision observations, exposed or not. Explicitly not the headline. */
   secondary: SecondaryReading
@@ -243,7 +305,10 @@ export interface DecisionGrade {
  * possibly a later outcome that settles which of them was right.
  *
  * All three are free-form strings from a vocabulary the caller defines. They
- * are compared by exact equality, so use one canonical spelling per judgment.
+ * are compared by exact equality (case and whitespace included), so use one
+ * canonical spelling per judgment. A judgment that is missing, empty, or not
+ * a string counts as "did not speak"; a whitespace-only string counts as a
+ * judgment. A missing or empty `laterOutcome` means "not settled yet".
  */
 export interface JudgmentPair {
   /** What the system said. */
@@ -254,19 +319,26 @@ export interface JudgmentPair {
   laterOutcome?: string
   /** Optional bucket, used by the default `groupBy`. */
   group?: string
-  /** Optional identifier, carried through into `examples`. */
+  /**
+   * Optional identifier, carried through into `examples`. Not used for
+   * deduplication: pairs sharing an id are counted separately.
+   */
   id?: string
 }
 
 /** Why a divergence or calibration reading was refused. */
 export type DivergenceRefusalCode =
-  /** Too few occasions where disagreement was even possible. */
+  /** Fewer comparable pairs (both judges spoke) than `minComparablePairs`. */
   | 'comparable_pairs_below_minimum'
-  /** Disagreements happened, but too few of them to be more than noise. */
+  /** Fewer disagreements than `minDivergentCount` (including zero). */
   | 'divergent_count_below_minimum'
-  /** Disagreements are numerous but too rare a share of the population. */
+  /**
+   * The exact share `divergentCount / comparablePairs` is below
+   * `minDivergentRate`, or there are no comparable pairs so no rate exists.
+   * Checked independently of the count floor.
+   */
   | 'divergent_rate_below_minimum'
-  /** Too few disagreements have a later outcome attached to settle them. */
+  /** Fewer disagreements with a `laterOutcome` than `minResolvedDivergent`. */
   | 'resolved_divergent_below_minimum'
 
 /** Caller-supplied floors for divergence. Every field has a default. */
@@ -279,11 +351,13 @@ export interface DivergenceConfig {
   minDivergentRate?: number
   /** Minimum disagreements with a later outcome, before naming who was right. Default 3. */
   minResolvedDivergent?: number
-  /** How many divergent pairs to carry through as examples. Default 10. */
+  /** How many divergent pairs to carry through as examples. Default 10. 0 allowed. */
   exampleLimit?: number
   /**
-   * Arbitrary caller-supplied bucketing. Return `null` to leave a pair out of
-   * the per-group breakdown entirely. Defaults to the pair's own `group`.
+   * Arbitrary caller-supplied bucketing. Return `null` (or `undefined`) to
+   * leave a pair out of the per-group breakdown; it still counts in `overall`.
+   * Any other non-string return throws a TypeError. Called once per pair.
+   * Defaults to the pair's own `group`.
    */
   groupBy?: (pair: JudgmentPair) => string | null
 }
@@ -313,9 +387,17 @@ export interface CalibrationReading {
   humanRight: number
   /** The outcome matched neither judgment. */
   neitherRight: number
+  /** Each rate is its count over `resolvedDivergent`, rounded to 3 places. `null` when nothing is resolved. */
   engineRightRate: number | null
   humanRightRate: number | null
   neitherRightRate: number | null
+  /**
+   * Gated only by `minResolvedDivergent`. It is independent of the parent
+   * report's `status`, so it can be 'reportable' on a report that is
+   * 'refused' (for example, 3 settled disagreements out of 100 pairs, below
+   * the rate floor). `describeDivergence` does not print calibration for a
+   * refused report.
+   */
   status: 'reportable' | 'refused'
   refusalCodes: DivergenceRefusalCode[]
   note: 'engine_and_human_accuracy_reported_separately_never_merged'
@@ -335,11 +417,16 @@ export interface DivergenceReport {
   comparablePairs: number
   agreements: number
   divergentCount: number
+  /**
+   * `divergentCount / comparablePairs`, rounded to 3 places for display. The
+   * rate floor is checked against the exact ratio, so a rate that displays as
+   * 0.05 can still be refused at a 0.05 floor. `null` when nothing is comparable.
+   */
   divergentRate: number | null
   status: 'reportable' | 'refused'
   refusalCodes: DivergenceRefusalCode[]
   calibration: CalibrationReading
-  /** Divergent pairs, capped at `exampleLimit`, in input order. */
+  /** Divergent pairs, capped at `exampleLimit`, in input order. These are your own pair objects, not copies. */
   examples: JudgmentPair[]
   interpretation: 'disagreement_is_a_signal_not_a_verdict'
 }
@@ -347,7 +434,10 @@ export interface DivergenceReport {
 /** The full result of `computeDivergence`. */
 export interface DivergenceResult {
   overall: DivergenceReport
-  /** One report per distinct group key, sorted by key. Empty when nothing grouped. */
+  /**
+   * One report per distinct group key, sorted by UTF-16 code unit order
+   * (Array.prototype.sort, not locale-aware). Empty when nothing grouped.
+   */
   groups: DivergenceReport[]
   thresholds: ResolvedDivergenceConfig
 }

@@ -1,0 +1,12 @@
+{
+  "advice-ledger-kit": [
+    "DEFAULT_DIVERGENCE_CONFIG",
+    "DEFAULT_GRADE_CONFIG",
+    "computeDivergence",
+    "describeDivergence",
+    "describeGrade",
+    "gradeDecision",
+    "resolveDivergenceConfig",
+    "resolveGradeConfig"
+  ]
+}

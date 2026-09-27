@@ -1,462 +1,411 @@
 # advice-ledger-kit
 
-Compare a person's response to a recommendation with later observed outcomes,
-or measure disagreement between a model and a human judge. The library keeps
-before and after evidence separate, uses exposed after observations for the
-headline grade, and returns refusal codes when evidence floors are unmet.
-These results are evidence-bounded decision support: they do not establish that
-the recommendation was correct or replace human and domain review. The caller
-supplies the observations, exposure flags, outcomes, and floor settings.
+A small, zero-dependency TypeScript library for checking a recommender
+against what happened after people acted on its advice. It has two parts:
 
-**Quick start:** From a clone, run `npm install` and `npm test`, then see
-[`gradeDecision`](#api-1--gradedecisiondecision-recommendation-observations-config)
-or [`computeDivergence`](#api-2--computedivergencepairs-config) for worked
-examples. See [Limits](#limits) before using a verdict in a decision.
+- **`gradeDecision`** grades one decision (a person adopted or dismissed a
+  recommendation) against later observations of the same check on the same
+  subject. It will not give a verdict unless the data clears explicit floors.
+  Below a floor it returns `verdict: 'refused'` and a list of
+  machine-readable refusal codes that say which floor failed.
+- **`computeDivergence`** measures how often an engine and a human disagreed
+  about the same items. Where a later outcome settles a disagreement, it
+  reports "engine was right" and "human was right" as two separate counts and
+  never blends them into one accuracy number.
 
-A tiny, zero-dependency library for grading a recommender against what a
-person did with its advice. Grading a recommendation engine against human
-override is not new — demand planners have called it Forecast Value Added for
-twenty years, and clinical informatics has studied alert-override
-appropriateness for longer. What's usually missing is a version with explicit
-statistical floors, shipped where the person who owns the decision can see it,
-instead of an analysis someone runs quarterly or a metric published only in
-aggregate. This library is that version: it compares a **before** window to an
-**after** window instead of only tallying what happened afterward, it only
-lets outcomes where the advice could actually have applied create or reverse
-the headline reading, it holds each window to its own floor, and below any
-floor it hands back **machine-readable refusal codes instead of a verdict**.
-It also ships a second engine for the case where two independent judges rate
-the same thing: it measures how often they disagree, and where a later
-outcome exists, it reports **engine-was-right** and **human-was-right** as two
-separate numbers that are never blended into one "accuracy".
+The shapes are generic: a recommendation is `{ subjectId, checkKey }`, an
+observation is `good` or `bad`, and judgments are strings from your own
+vocabulary.
 
-Domain-agnostic on purpose. A recommendation is `{subjectId, checkKey}`, an
-observation is `good` or `bad`, and everything else is the caller's vocabulary.
-It works the same for maintenance procedures, content-moderation calls,
-code-quality rules, spending suggestions, or health experiments.
+**Use it when** you log recommendations, the human call on each one, and
+dated outcomes afterward, and you want a grade that refuses rather than
+guesses when the log is thin.
 
-**Prior art, named up front.** [Forecast Value Added](https://www.sas.com/en/whitepapers/forecast-value-added-analysis-106186.html)
-(demand planning) grades a human override against a statistical baseline and
-is the closest precedent to API 1; its own published critique is that a
-positive result can be accidental, which is exactly what the floors here are
-for. Alert-override-appropriateness review in clinical decision support
-(e.g. [systematic review, PMC7400042](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7400042/))
-is the closest precedent to API 2, and it typically requires manual chart
-review rather than an automatic, in-the-moment number. Netflix's RecSysOps
-treats a human choosing a low-ranked item as a signal worth investigating,
-which is API 2's divergence case running as internal ops. None of the three
-publish explicit minimum-count floors or return a machine-readable refusal
-code below them — that combination, not the loop itself, is what this library
-adds.
-
-## The core insight, plainly
-
-A system that refuses to fabricate a reading about the world should also refuse
-to pretend its own advice is landing.
-
-It is easy to build a recommender that never checks itself. It is nearly as easy
-to build one that checks itself badly, and worse, because a bad self-check
-produces confident numbers. Two specific bad self-checks show up over and over:
-
-**"Nothing has gone wrong since you adopted this."** That sentence is satisfied
-by advice that worked. It is equally satisfied by a subject nobody looked at
-again, and by a subject where the problem was never happening in the first
-place. Without a baseline you cannot tell those three apart, and the tool will
-happily report the third one as a win.
-
-**"It went wrong twice, so the advice failed."** Except on both of those
-occasions the advice was not in force. The machine was out of service, the rule
-did not apply to that file, the user did not attempt the experiment that day.
-Counting those outcomes against the advice blames it for what happened while it
-was on the shelf.
-
-This library refuses both, and it refuses out loud. When the evidence is thin it
-returns `verdict: 'refused'` with an array like
-`['baseline_below_minimum', 'exposed_result_below_minimum']` — codes you can
-branch on and turn into "here is exactly what would make this gradeable"
-rather than a boolean or a vague `unproven` string.
+**Do not use it when** you need a causal effect estimate (use a randomized
+experiment), a significance test or confidence interval (this library has
+none), probability calibration of a model's scores, or deduplication and
+cleaning of your log (it counts exactly what you pass).
 
 ## Install
 
+Not published to npm yet. Until then, install from GitHub (the repository
+needs to be readable by you):
+
 ```bash
-npm install
-npm test           # vitest
-npm run typecheck  # tsc --noEmit
-npm run build      # emits dist/ (ESM + .d.ts)
+npm install github:lkopietz3-byte/advice-ledger-kit
 ```
 
-Zero runtime dependencies. ESM only (`"type": "module"`). Strict TypeScript. MIT.
+The package builds itself on install through its `prepare` script. Recent
+npm versions may warn that `prepare` is not covered by `allowScripts`; with
+npm 11.16 the build still ran. It is ESM only, has no runtime dependencies,
+ships TypeScript declarations, and needs Node 20 or later.
 
-## API 1 — `gradeDecision(decision, recommendation, observations, config?)`
+## Quickstart
 
-A maintenance system noticed that pump-14's seal kept leaking and recommended a
-weekly re-torque of the mounting bolts. The technician adopted it on February 1.
-Inspections keep happening, and each one records whether the procedure was
-actually performed that week.
+A maintenance system saw pump-14's seal leaking and recommended a weekly
+re-torque. The technician adopted it on February 1. Each later inspection
+records whether the re-torque was actually done that week (`exposed`).
 
-```ts
-import { gradeDecision, describeGrade } from 'advice-ledger-kit'
-import type { Decision, Observation, Recommendation } from 'advice-ledger-kit'
+```js
+import { gradeDecision, describeGrade, computeDivergence, describeDivergence } from 'advice-ledger-kit'
 
-const recommendation: Recommendation = {
-  id: 'rec-88',
-  subjectId: 'pump-14',
-  checkKey: 'seal-leak',
-  proposedAt: '2026-01-18',
-  basis: 'observed',
-}
+const recommendation = { id: 'rec-88', subjectId: 'pump-14', checkKey: 'seal-leak', proposedAt: '2026-01-18' }
+const decision = { recommendationId: 'rec-88', status: 'adopted', decidedAt: '2026-02-01' }
+const row = (observedAt, state, exposed) => ({ subjectId: 'pump-14', checkKey: 'seal-leak', observedAt, state, exposed })
 
-const decision: Decision = {
-  recommendationId: 'rec-88',
-  status: 'adopted',
-  decidedAt: '2026-02-01',
-}
-
-const log: Observation[] = [
-  // Before the decision. Exposure does not apply: there was no advice in force.
-  { subjectId: 'pump-14', checkKey: 'seal-leak', state: 'bad',  observedAt: '2026-01-04' },
-  { subjectId: 'pump-14', checkKey: 'seal-leak', state: 'bad',  observedAt: '2026-01-11' },
-  { subjectId: 'pump-14', checkKey: 'seal-leak', state: 'good', observedAt: '2026-01-18' },
-  { subjectId: 'pump-14', checkKey: 'seal-leak', state: 'bad',  observedAt: '2026-01-25' },
-  { subjectId: 'pump-14', checkKey: 'seal-leak', state: 'bad',  observedAt: '2026-01-29' },
-  { subjectId: 'pump-14', checkKey: 'seal-leak', state: 'good', observedAt: '2026-01-31' },
-
-  // After. `exposed` says whether the re-torque actually happened that week.
-  { subjectId: 'pump-14', checkKey: 'seal-leak', state: 'good', observedAt: '2026-02-08', exposed: true },
-  { subjectId: 'pump-14', checkKey: 'seal-leak', state: 'good', observedAt: '2026-02-15', exposed: true },
-  { subjectId: 'pump-14', checkKey: 'seal-leak', state: 'good', observedAt: '2026-02-22', exposed: true },
-  { subjectId: 'pump-14', checkKey: 'seal-leak', state: 'bad',  observedAt: '2026-03-01', exposed: true },
-  { subjectId: 'pump-14', checkKey: 'seal-leak', state: 'bad',  observedAt: '2026-03-08', exposed: false },
+const log = [
+  // Before the decision (exposure does not apply here)
+  row('2026-01-04', 'bad'), row('2026-01-11', 'bad'), row('2026-01-18', 'good'),
+  row('2026-01-25', 'bad'), row('2026-01-29', 'bad'), row('2026-01-31', 'good'),
+  // After the decision
+  row('2026-02-08', 'good', true), row('2026-02-15', 'good', true), row('2026-02-22', 'good', true),
+  row('2026-03-01', 'bad', true),
+  row('2026-03-08', 'bad', false), // the re-torque was not done that week
 ]
 
 const grade = gradeDecision(decision, recommendation, log)
+console.log(grade.verdict)      // 'holding'
+console.log(grade.baseline)     // { observations: 6, bad: 4, good: 2, badRate: 0.667 }
+console.log(grade.result)       // { observations: 4, bad: 1, good: 3, badRate: 0.25 }
+console.log(grade.badRateDelta) // -0.417
+console.log(grade.secondary.observations, grade.secondary.bad, grade.secondary.wouldBeVerdict)
+// 5 2 'not-holding'
+console.log(describeGrade(grade))
+// Holding: seal-leak on pump-14 was bad in 4 of 6 observations before and
+// 1 of 4 exposed observations since the recommendation was adopted on 2026-02-01.
+
+// The same call on a two-row log refuses and says why.
+const thin = gradeDecision(decision, recommendation, [row('2026-01-25', 'bad'), row('2026-02-08', 'good', true)])
+console.log(thin.verdict, thin.refusalCodes)
+// refused [ 'baseline_below_minimum', 'result_below_minimum', 'exposed_result_below_minimum' ]
+
+// Divergence: 20 items both judges rated, 5 disagreements, all later settled.
+const pairs = [
+  ...Array.from({ length: 15 }, () => ({ engineJudgment: 'keep', humanJudgment: 'keep' })),
+  ...Array.from({ length: 3 }, () => ({ engineJudgment: 'remove', humanJudgment: 'keep', laterOutcome: 'remove' })),
+  ...Array.from({ length: 2 }, () => ({ engineJudgment: 'remove', humanJudgment: 'keep', laterOutcome: 'keep' })),
+]
+console.log(describeDivergence(computeDivergence(pairs).overall))
+// Overall: the human disagreed on 5 of 20 comparable pairs. Of the 5 with a
+// later outcome, the engine was right 3 and the human was right 2.
 ```
 
-```jsonc
-{
-  "verdict": "holding",
-  "refusalCodes": [],
-  "baseline": { "observations": 6, "bad": 4, "good": 2, "badRate": 0.667 },
-  "result":   { "observations": 4, "bad": 1, "good": 3, "badRate": 0.25 },
-  "badRateDelta": -0.417,
-  "secondary": {
-    "label": "secondary-not-the-headline",
-    "observations": 5, "bad": 1, "badRate": 0.2,
-    "wouldBeVerdict": "holding"
-  }
-}
-```
+Read the output closely. The verdict is `holding` even though the problem
+recurred once: one bad exposed reading is below the default refute bar of 2.
+The unexposed March 8 reading is not graded, and `secondary` shows that an
+exposure-blind grader would have said `not-holding`.
 
-```ts
-describeGrade(grade)
-// "Holding: seal-leak on pump-14 was bad in 4 of 6 before, 1 of 4 since
-//  the recommendation was adopted on 2026-02-01."
-```
+## How `gradeDecision` works
 
-Note what the result carries: the raw counts on **both** sides, so a caller can
-render the actual sentence a person needs ("bad in 4 of 6 before, 1 of 4 since")
-rather than a bare label. `holding` here does not mean nothing went wrong. One
-recurrence did happen; it is below the refute bar, and the before/after rates
-are in the object so nobody has to take the word `holding` on faith.
+1. **Structural checks first.** If `decision.recommendationId` does not equal
+   `recommendation.id`, the `checkKey` is empty or whitespace, or
+   `requireObservedBasis` is on and the basis is `'model-proposed'`, the grade
+   is refused with only those codes. Nothing else is read, and the windows in
+   the result are all-zero placeholders, not measurements.
+2. **Matching.** Only observations whose `subjectId` and `checkKey` exactly
+   equal the recommendation's are read. You can pass your whole log.
+3. **Windows.** Observations with `observedAt < decidedAt` form the
+   **baseline**. Observations with `observedAt > decidedAt` form the
+   post-decision window, and those with `exposed === true` form the
+   **result** (the headline). `exposed: false` and a missing flag both count
+   as not exposed. Observations exactly at `decidedAt` grade neither window
+   and are counted in `atBoundaryObservations`. Dates are compared as strings.
+4. **Floors.** Each failing floor adds a code, and all failing floors are
+   listed together.
+5. **Verdict.** If no floor fails: `not-holding` when EITHER the result has
+   at least `refuteThreshold` bad observations OR its bad rate is higher than
+   the baseline's, otherwise `holding`.
 
-Run the same call against a two-row log and it says so instead of guessing:
+The rate check is exact: it compares the raw counts by cross-multiplication
+(`result.bad * baseline.observations` against
+`baseline.bad * result.observations`), never the rounded `badRate` fields or
+the sign of `badRateDelta`. That matters right at a rounding boundary: 81 bad
+of 650 before (0.1246...) and 1 bad of 8 exposed since (0.125 exactly) both
+display as `badRate: 0.125`, so `badRateDelta` shows `0`, and yet the exposed
+rate is a hair higher than the baseline's, so the verdict is `not-holding`.
+Show `badRateDelta` and the raw counts next to the verdict; do not re-derive
+the verdict from `badRateDelta`'s sign.
 
-```ts
-gradeDecision(decision, recommendation, [
-  { subjectId: 'pump-14', checkKey: 'seal-leak', state: 'bad',  observedAt: '2026-01-25' },
-  { subjectId: 'pump-14', checkKey: 'seal-leak', state: 'good', observedAt: '2026-02-08', exposed: true },
-])
-// verdict: "refused"
-// refusalCodes: [
-//   "baseline_below_minimum",
-//   "result_below_minimum",
-//   "exposed_result_below_minimum"
-// ]
-```
+The verdict grades the decision and reads the same either way the human
+called it:
 
-### The verdict grades the decision, not the recommendation
-
-It means the same thing whichever way the human called it:
-
-| Decision | What happened after | Verdict |
+| Decision | Exposed bad count and rate after | Verdict |
 | --- | --- | --- |
-| adopted | the problem stayed away | `holding` |
-| adopted | the problem came back, at the refute bar | `not-holding` |
-| dismissed | the problem stayed away | `holding` — the pass looks fine |
-| dismissed | the problem came back, at the refute bar | `not-holding` — the evidence sided with the advice |
+| adopted | count below `refuteThreshold` AND rate not above baseline | `holding` |
+| adopted | count at/above `refuteThreshold` OR rate above baseline | `not-holding` |
+| dismissed | count below `refuteThreshold` AND rate not above baseline | `holding` (the pass looks fine) |
+| dismissed | count at/above `refuteThreshold` OR rate above baseline | `not-holding` (the evidence sided with the advice) |
 
-That last row is the one worth wiring into a UI. A dismissal that later gets
-contradicted by the record is the single most useful thing a recommender can
-learn about itself.
+For a dismissed recommendation, set `exposed: true` on occasions where the
+advice would have applied had it been adopted.
 
 ### Refusal codes
 
-| Code | What it means | What would fix it |
+| Code | Kind | Fires when |
 | --- | --- | --- |
-| `baseline_below_minimum` | Too few observations before the decision. | Look at the subject more before deciding, or wait. |
-| `result_below_minimum` | Too few observations after the decision. | Nobody has re-checked. Re-check. |
-| `exposed_result_below_minimum` | Observations exist, but too few where the advice could apply. | Record exposure, or wait for occasions where it applies. |
-| `baseline_lacks_negative_signal` | Nothing was going wrong before the decision. | Nothing. This subject cannot demonstrate improvement it never needed. |
-| `no_gradeable_check_key` | The recommendation names no check. | Attach a check key, or accept that this advice is ungradeable. |
-| `basis_not_gradeable` | `requireObservedBasis` is on and a model proposed this. | Turn the flag off, or wait for an observed proposal. |
-| `decision_recommendation_mismatch` | The two rows do not refer to each other. | A caller bug. Fix the join. |
+| `baseline_below_minimum` | floor | baseline observations < `minBaselineObservations` (default 3) |
+| `baseline_lacks_negative_signal` | floor | baseline bad observations < `minBaselineBadObservations` (default 1). With a full baseline this means the problem was not happening before, so its absence afterward says nothing. An empty baseline triggers it too. |
+| `result_below_minimum` | floor | post-decision observations, exposed or not, < `minResultObservations` (default 3) |
+| `exposed_result_below_minimum` | floor | exposed post-decision observations < `minExposedResultObservations` (default 3) |
+| `no_gradeable_check_key` | structural | `checkKey` is empty, whitespace-only, or missing |
+| `basis_not_gradeable` | structural | `requireObservedBasis` is true and `basis` is `'model-proposed'` |
+| `decision_recommendation_mismatch` | structural | `decision.recommendationId !== recommendation.id` |
 
-The first three are the floors named in `GradeConfig`; the rest are structural.
-Codes accumulate — a thin log returns all of the ones that apply, not the first.
+Structural codes short-circuit: when any is present, floor codes are not
+computed. Floor codes accumulate.
 
-## Why exposure alignment matters
+### Exposure alignment
 
-`Observation.exposed` is the flag that says *the recommendation could actually
-have applied on this occasion*. Only observations with `exposed === true` are
-allowed to create or reverse the headline verdict. `false` and omitted are both
-treated as not-exposed, deliberately: an unanswered exposure question is not a
-confirmed exposure, and treating it like one is the whole bug.
+Only exposed observations can create or reverse the headline verdict. Here
+is the failure that prevents. After adoption there are five inspections:
+three with the re-torque done, all clean, and two while the pump was pulled
+for unrelated work, both leaking.
 
-Here is the failure it prevents, concretely.
-
-The re-torque recommendation is adopted on pump-14. Over the next two months
-there are five inspections. On three of them the pump was in the line and the
-re-torque was performed; all three came back clean. On the other two the pump
-had been pulled for an unrelated impeller rebuild, the re-torque never happened,
-and both inspections logged the leak.
-
-```ts
-const grade = gradeDecision(decision, recommendation, [
-  /* baseline: 3 bad, 1 good */
-  { /* … */ state: 'good', observedAt: '2026-02-08', exposed: true  },
-  { /* … */ state: 'good', observedAt: '2026-02-15', exposed: true  },
-  { /* … */ state: 'good', observedAt: '2026-02-22', exposed: true  },
-  { /* … */ state: 'bad',  observedAt: '2026-03-01', exposed: false },
-  { /* … */ state: 'bad',  observedAt: '2026-03-08', exposed: false },
+```js
+const pulled = gradeDecision(decision, recommendation, [
+  row('2026-01-04', 'bad'), row('2026-01-11', 'bad'), row('2026-01-18', 'good'), row('2026-01-25', 'bad'),
+  row('2026-02-08', 'good', true), row('2026-02-15', 'good', true), row('2026-02-22', 'good', true),
+  row('2026-03-01', 'bad', false), row('2026-03-08', 'bad', false),
 ])
-
-grade.verdict                    // "holding"
-grade.result                     // { observations: 3, bad: 0, good: 3, badRate: 0 }
-grade.secondary.wouldBeVerdict   // "not-holding"   ← what an unaligned grader says
-grade.secondary.observations     // 5
-grade.secondary.bad              // 2
+console.log(pulled.verdict)                  // 'holding'
+console.log(pulled.result)                   // { observations: 3, bad: 0, good: 3, badRate: 0 }
+console.log(pulled.secondary.wouldBeVerdict) // 'not-holding'
 ```
 
-Without exposure alignment those two out-of-service inspections flip the verdict
-to `not-holding`. The system then tells the technician its own advice failed, on
-the strength of two readings taken while the advice was sitting on a shelf. Next
-time it will propose something worse, and it will have taught itself to.
+An exposure-blind grader would blame the advice for two readings taken while
+it could not apply. That reading is still returned in `secondary`, labeled
+`'secondary-not-the-headline'`, so the gap is visible. Its `wouldBeVerdict`
+applies the same floors to all post-decision observations, and is
+`'refused'` when that grade would also refuse.
 
-The consequence compounds in the direction you would least want: advice is
-*least* likely to be applied exactly when a subject is in trouble, and a subject
-in trouble is exactly when bad outcomes cluster. So unaligned grading
-systematically punishes advice for the periods when it was least able to help.
+If your domain has no exposure concept, set `exposed: true` on every
+post-decision observation. Leaving the flag off everywhere makes every grade
+that passes the structural checks refuse with `exposed_result_below_minimum`,
+on purpose.
 
-The unaligned reading is not thrown away — it is right there in `secondary`,
-labelled `'secondary-not-the-headline'` with
-`interpretation: 'exposure_unaligned_descriptive_only'`, carrying its own
-`wouldBeVerdict` so the gap between the two readings is visible rather than
-hidden. It just cannot become the headline. That is a structural property of the
-return shape, not a convention someone has to remember.
+### Why `refuteThreshold` cannot be below `proposeThreshold`
 
-**If your domain has no exposure concept, set `exposed: true` on every
-post-decision observation.** That is one line, it is explicit, and it means the
-next person reading the code knows the question was considered. Leaving the flag
-off everywhere makes this library refuse to grade anything, on purpose.
+`proposeThreshold` is how many bad observations it took to justify the
+recommendation (default 2; the library does not check that the proposal met
+it). `refuteThreshold` is how many bad exposed observations overturn the
+decision. It defaults to `proposeThreshold`, may be raised, and setting it
+lower throws a `RangeError`. A grader that needs two readings to suggest
+something and one to condemn it is biased toward "not holding".
 
-## Why asymmetry in the wrong direction is a bug
+Symmetry does not bound the window. The post-decision window is every
+observation you pass, so over a long enough period any nonzero recurrence
+reaches any fixed count. If that matters, pass a bounded window (for
+example, the first N weeks after the decision).
 
-`proposeThreshold` is how many bad observations it took to justify emitting the
-recommendation. `refuteThreshold` is how many it takes to overturn the decision.
-**It defaults to `proposeThreshold`, and setting it lower throws a `RangeError`.**
+## How `computeDivergence` works
 
-The failure mode is quiet and it is common. A recommender wants to be careful
-about *suggesting* things, so it requires the problem to recur — two
-observations, across two dates or two subjects — before it will speak. Then the
-grading path is written later by someone else, and it flips a rule to "not
-holding" on **one** post-adoption recurrence, because one recurrence obviously
-means the rule is not working.
+A pair is **comparable** when both `engineJudgment` and `humanJudgment` are
+non-empty strings. Pairs missing a judgment are counted in `totalPairs` but
+are not agreements. A comparable pair **diverges** when the two strings
+differ (exact comparison, case and whitespace included).
 
-Those two bars are in the same system, judging the same evidence, and they are
-off by a factor of two in the direction that makes everything the system
-recommends eventually read as failing. Run it long enough and every piece of
-advice you ever gave is marked broken, because a single stray observation is all
-it takes, and given enough time you will always get one. The user learns to
-ignore the grade, which is the correct response, and the loop dies.
+Divergence is `reportable` only when all three floors pass:
 
-Raising `refuteThreshold` above `proposeThreshold` is allowed — that is a
-deliberate choice to make decisions harder to overturn, and it is visible in
-`grade.thresholds` on every result. Lowering it is not a policy, it is a thumb
-on the scale, so this library will not let you do it silently.
+- `minComparablePairs` (default 10): three disagreements out of three pairs
+  is a 100% rate and still noise.
+- `minDivergentCount` (default 3): one odd call is not a pattern.
+- `minDivergentRate` (default 0.05): three disagreements out of a thousand
+  is not either. This floor is checked against the exact ratio;
+  `divergentRate` is rounded to 3 places for display, so 5 of 101 shows as
+  0.05 and is still refused at a 0.05 floor.
 
-## API 2 — `computeDivergence(pairs, config?)`
+Counts and rates are always returned. The floors gate `status`.
 
-Two independent judges rating the same object are most informative when they
-**disagree**. Agreement is cheap; disagreement is the only place either judge can
-be shown wrong. Most systems with two judges available never put them side by
-side at all — the engine's rating goes in one column, the human's override goes
-in another, and nobody ever subtracts.
+**Calibration.** For divergent pairs with a non-empty `laterOutcome`,
+`engineRight`, `humanRight` and `neitherRight` partition the resolved pairs
+exactly (the two judgments differ, so at most one can match). There is no
+blended accuracy field. Calibration has its own floor,
+`minResolvedDivergent` (default 3), and its own `status`, which is
+independent of the report's status: a report can be refused on the rate
+floor while its calibration is reportable. `describeDivergence` leaves
+calibration out of the sentence for a refused report.
 
-A content-moderation queue: the engine proposes `remove` or `keep`, a reviewer
-confirms or overrules, and an appeals board sometimes settles the case later.
+**Groups.** Pairs are bucketed by `group`, or by your `groupBy(pair)`. Return
+`null` or `undefined` to leave a pair out of the breakdown (it still counts
+in `overall`); any other non-string return throws a `TypeError`. Groups are
+sorted by key (plain `Array.prototype.sort`, not locale-aware) and each gets
+every floor independently.
 
-```ts
-import { computeDivergence, describeDivergence } from 'advice-ledger-kit'
-import type { JudgmentPair } from 'advice-ledger-kit'
-
-const times = (n: number, pair: JudgmentPair): JudgmentPair[] =>
-  Array.from({ length: n }, () => pair)
-
-const queue: JudgmentPair[] = [
-  // images: 34 agreements, 6 overrules (4 later settled for the engine, 2 for the reviewer)
+```js
+const times = (n, pair) => Array.from({ length: n }, () => pair)
+const queue = [
   ...times(34, { engineJudgment: 'remove', humanJudgment: 'remove', group: 'images' }),
-  ...times(4,  { engineJudgment: 'remove', humanJudgment: 'keep', laterOutcome: 'remove', group: 'images' }),
-  ...times(2,  { engineJudgment: 'remove', humanJudgment: 'keep', laterOutcome: 'keep',   group: 'images' }),
-
-  // text: 28 agreements, 2 overrules
+  ...times(4, { engineJudgment: 'remove', humanJudgment: 'keep', laterOutcome: 'remove', group: 'images' }),
+  ...times(2, { engineJudgment: 'remove', humanJudgment: 'keep', laterOutcome: 'keep', group: 'images' }),
   ...times(28, { engineJudgment: 'keep', humanJudgment: 'keep', group: 'text' }),
-  ...times(1,  { engineJudgment: 'remove', humanJudgment: 'keep', laterOutcome: 'keep',   group: 'text' }),
-  ...times(1,  { engineJudgment: 'keep', humanJudgment: 'remove', laterOutcome: 'remove', group: 'text' }),
+  ...times(1, { engineJudgment: 'remove', humanJudgment: 'keep', laterOutcome: 'keep', group: 'text' }),
+  ...times(1, { engineJudgment: 'keep', humanJudgment: 'remove', laterOutcome: 'remove', group: 'text' }),
 ]
-
 const { overall, groups } = computeDivergence(queue)
+console.log(describeDivergence(overall))
+// Overall: the human disagreed on 8 of 70 comparable pairs. Of the 8 with a
+// later outcome, the engine was right 4 and the human was right 4.
+console.log(describeDivergence(groups[0]))
+// Group images: the human disagreed on 6 of 40 comparable pairs. Of the 6 with
+// a later outcome, the engine was right 4 and the human was right 2.
+console.log(describeDivergence(groups[1]))
+// Group text: refused to report divergence (divergent_count_below_minimum);
+// 2 of 30 comparable pairs diverged.
 ```
 
-```jsonc
-{
-  "overall": {
-    "comparablePairs": 70,
-    "agreements": 62,
-    "divergentCount": 8,
-    "divergentRate": 0.114,
-    "status": "reportable",
-    "refusalCodes": [],
-    "calibration": {
-      "resolvedDivergent": 8,
-      "engineRight": 4,
-      "humanRight": 4,
-      "neitherRight": 0,
-      "engineRightRate": 0.5,
-      "humanRightRate": 0.5,
-      "status": "reportable"
-    }
-  },
-  "groups": [
-    { "group": "images", "comparablePairs": 40, "divergentCount": 6,
-      "divergentRate": 0.15,  "status": "reportable", "refusalCodes": [] },
-    { "group": "text",   "comparablePairs": 30, "divergentCount": 2,
-      "divergentRate": 0.067, "status": "refused",
-      "refusalCodes": ["divergent_count_below_minimum"] }
-  ]
-}
-```
+Overall the engine and the human tie at 4 each. By group, the images queue
+favors the engine 4 to 2, and the text queue has too few disagreements to
+report.
 
-```ts
-describeDivergence(overall)
-// "Overall: the human disagreed on 8 of 70 comparable pairs. Of the 8 with a
-//  later outcome, the engine was right 4 and the human was right 4."
+## API reference
 
-describeDivergence(groups[0])
-// "Group images: the human disagreed on 6 of 40 comparable pairs. Of the 6 with
-//  a later outcome, the engine was right 4 and the human was right 2."
+All functions are pure: they never modify their inputs, and results do not
+depend on input order (except `examples`, which keep input order).
 
-describeDivergence(groups[1])
-// "Group text: refused to report divergence (divergent_count_below_minimum);
-//  2 of 30 comparable pairs diverged."
-```
+### `gradeDecision(decision, recommendation, observations, config?) => DecisionGrade`
 
-This example is worth reading twice. The overall calibration is a dead heat, 4
-and 4, which says nothing actionable. Broken out by group, the images queue is 4
-to 2 in the engine's favour and the text queue is refused outright for having
-too few disagreements to mean anything. **The grouped view carries the signal
-that the aggregate washes out**, which is why `groupBy` exists.
+Grades one decision as described above. Returns `verdict`, `refusalCodes`,
+the `baseline`, `result` and `secondary` windows (`observations`, `bad`,
+`good`, `badRate` rounded to 3 places with exact halves up, `null` when
+empty), `badRateDelta` (`result.badRate - baseline.badRate` from the rounded
+rates, `null` when either window is empty — display only, not what the
+verdict's rate check compares), `atBoundaryObservations`, the echoed
+`thresholds`, and constant `method` and
+`interpretation: 'association_not_causation'` labels.
 
-Pass any bucketing you like:
+Throws `RangeError`/`TypeError` from `resolveGradeConfig`, and `TypeError`
+when `recommendation.id`, `recommendation.subjectId` or
+`decision.recommendationId` is not a string, `basis` is not `'observed'` or
+`'model-proposed'`, `status` is not `'adopted'` or `'dismissed'`,
+`decidedAt` is not a non-empty string, or a matching observation has a
+`state` other than `'good'`/`'bad'` or a missing `observedAt`.
 
-```ts
-computeDivergence(queue, { groupBy: (pair) => `engine-said-${pair.engineJudgment}` })
-```
+### `describeGrade(grade) => string`
 
-Return `null` from `groupBy` to leave a pair out of the breakdown entirely. It
-still counts in `overall`.
+One sentence: the verdict with both windows' counts, or "Refused to grade
+... :" followed by the codes verbatim.
 
-### The denominator, and the two floors
+### `resolveGradeConfig(config?) => ResolvedGradeConfig`
 
-`comparablePairs` counts only the pairs where **both** judges actually spoke.
-That is the population where disagreement was even possible. Most real datasets
-have far more one-sided rows than two-sided ones — plenty of engine ratings
-nobody reviewed — and counting those as agreements understates divergence badly.
+Fills defaults (`null` counts as omitted) and returns a new object. Throws
+`RangeError` when `refuteThreshold < proposeThreshold`,
+`minBaselineBadObservations` is not an integer >= 0, or any other count is
+not an integer >= 1; throws `TypeError` when `requireObservedBasis` is not a
+boolean.
 
-Divergence must clear **both** a count floor and a rate floor:
+### `DEFAULT_GRADE_CONFIG`
 
-- `minDivergentCount` (default 3) — one weird call is not a pattern.
-- `minDivergentRate` (default 0.05) — three disagreements out of a thousand is
-  not a pattern either.
-- `minComparablePairs` (default 10) — and three out of three, a perfect 100%
-  disagreement rate, is not a pattern at all.
+Frozen: `minBaselineObservations: 3`, `minResultObservations: 3`,
+`minExposedResultObservations: 3`, `minBaselineBadObservations: 1`,
+`proposeThreshold: 2`, `refuteThreshold: 2`, `requireObservedBasis: false`.
 
-Either floor alone lets one of those through. Counts and rates are always
-computed and always returned, because they are arithmetic, not claims. What the
-floors gate is `status`, the only field that says the number is worth acting on.
+### `computeDivergence(pairs, config?) => DivergenceResult`
 
-`calibration` carries its own floor (`minResolvedDivergent`, default 3) and its
-own `status`, so a population can legitimately have reportable divergence and
-refused calibration: plenty of disagreements, not enough of them settled yet.
+Returns `{ overall, groups, thresholds }`. Each report has `group`,
+`totalPairs`, `comparablePairs`, `agreements`, `divergentCount`,
+`divergentRate`, `status`, `refusalCodes`, `calibration`, `examples` (the
+first `exampleLimit` divergent pairs, your own objects), and
+`interpretation: 'disagreement_is_a_signal_not_a_verdict'`. Pairs are not
+deduplicated, even when they share an `id`. Throws `RangeError` from
+`resolveDivergenceConfig` and `TypeError` for a bad `groupBy` return.
 
-### Never one accuracy number
+### `describeDivergence(report) => string`
 
-`engineRight` and `humanRight` are reported separately and there is no blended
-field to read. On a divergent pair the two judgments differ by definition, so at
-most one of them can match the outcome, and `engineRight + humanRight +
-neitherRight === resolvedDivergent` exactly. A single "accuracy" is not just
-discouraged here, it is not constructible from the shape.
+One sentence for a report: refused with codes and raw counts; or the
+disagreement count plus either why calibration is withheld or the two
+separate hit counts.
 
-The reason is that merging them answers the wrong question. A system can be
-right 96% of the time overall and wrong on every single case a human bothers to
-overrule — and the second fact is the one that tells you where the model is
-weak, where the reviewers are miscalibrated, and which of the two you should be
-retraining.
+### `resolveDivergenceConfig(config?) => ResolvedDivergenceConfig`
 
-## Limits
+Fills defaults and returns a new object without `groupBy`. Throws
+`RangeError` when `minDivergentRate` is not a finite number in [0, 1],
+`exampleLimit` is not an integer >= 0, or another count is not an integer
+>= 1.
 
-**This measures association, not causation.** Every result carries
-`interpretation: 'association_not_causation'` for a reason. A `holding` verdict
-says the problem occurred less often after the decision than before it, on
-occasions where the advice could apply. It does not say the advice caused that.
-Seasonality, a concurrent change, regression to the mean, and the simple fact
-that somebody was paying attention to this subject at all are alternative
-explanations this library cannot rule out and does not try to. If you need a
-causal estimate, you need randomization, and this is not that.
+### `DEFAULT_DIVERGENCE_CONFIG`
 
-**It will often refuse to answer, and that is the point.** With the default
-floors, most decisions in a young ledger come back `refused`. That is the honest
-state of the evidence, not a bug and not a gap to paper over. A tool that always
-produces a verdict is not more useful than one that refuses; it is a tool whose
-verdicts you cannot trust, because you can no longer tell the well-evidenced
-ones from the empty ones. Render the refusal codes. `exposed_result_below_minimum`
-is genuinely useful information: it tells a user precisely what to go collect.
+Frozen: `minComparablePairs: 10`, `minDivergentCount: 3`,
+`minDivergentRate: 0.05`, `minResolvedDivergent: 3`, `exampleLimit: 10`.
 
-**A caller who sets every floor to 1 has defeated the entire purpose.** The
-library will let you — the floors are configuration, and there are legitimate
-reasons to tune them for a domain with a slow observation cadence. But floors of
-1 turn this into exactly the naive grader it was written to replace: one
-observation before, one after, and a confident verdict off a sample of two. If
-you find yourself lowering the floors to make the refusals go away, the
-refusals were correct and the ledger is too young. Lower them because you
-reasoned about the observation rate in your domain, and write down which.
+### Types
 
-**Baselines can be wrong in ways this cannot see.** The baseline window is
-"everything before the decision", which is only meaningful if the pre-decision
-period is comparable to the post-decision one. A subject that was in an unusual
-state before the decision gives a misleading baseline, and nothing here detects
-that. Similarly, `exposed` is caller-supplied and trusted completely: if your
-exposure recording is biased — say, exposure gets logged more reliably on
-occasions that go well — that bias flows straight into the headline.
+`Recommendation`, `RecommendationBasis`, `Decision`, `DecisionStatus`,
+`Observation`, `ObservationState`, `DecisionVerdict`, `GradeRefusalCode`,
+`GradeConfig`, `ResolvedGradeConfig`, `WindowReading`, `SecondaryReading`,
+`DecisionGrade`, `JudgmentPair`, `DivergenceRefusalCode`,
+`DivergenceConfig`, `ResolvedDivergenceConfig`, `CalibrationReading`,
+`DivergenceReport`, `DivergenceResult`. Each field is documented in the
+shipped `.d.ts` files.
 
-**Dates are compared as strings.** Use one consistent ISO-8601 format across a
-ledger. Mixing `'2026-01-01'` with `'2026-01-01T00:00:00Z'` sorts wrongly, and
-this library does not parse dates to protect you from it.
+## Honest limits
 
-**Two judges disagreeing tells you one of them is wrong, not which one.** That
-is what the `laterOutcome` field is for, and where no outcome exists,
-`calibration` refuses rather than guessing. Divergence alone is a place to look,
-not a verdict — hence `interpretation: 'disagreement_is_a_signal_not_a_verdict'`
-on every report.
+- **Association, not causation.** A `holding` verdict means the floors were
+  met and exposed recurrences stayed under the refute bar. It does not show
+  the advice caused anything. Seasonality, other changes, regression to the
+  mean, and extra attention to the subject are all possible explanations.
+- **No statistics beyond counts.** The floors are minimum counts, not
+  significance tests. Clearing them means "enough to look at", not "proven".
+- **The rate check only compares two windows, not a trend.** `holding`
+  requires the exposed bad rate not to exceed the baseline's, but that is one
+  before/after comparison, not a slope or a significance test. A rate that
+  crept up gradually across a long post-decision window and a rate that
+  spiked on day one look the same to this check.
+- **The window is whatever you pass.** There is no time limit on the
+  post-decision window, so a long window will eventually reach any count.
+- **It will often refuse.** With the default floors, a decision needs at
+  least 3 observations before and 3 exposed observations after, so a young
+  ledger often comes back refused. That is the intended behavior. Setting every
+  floor to 1 turns this back into the naive grader it guards against; lower
+  floors only for a reason you can state about your observation rate.
+- **Baselines can mislead.** The baseline is everything before the decision.
+  If that period was unusual, nothing here detects it.
+- **`exposed` is trusted.** If exposure is logged more reliably on good
+  occasions, that bias goes straight into the headline.
+- **Dates are strings.** Use one ISO-8601 format and one UTC offset for
+  every `decidedAt` and `observedAt`. `'2026-01-01'` sorts before
+  `'2026-01-01T00:00:00Z'`, and `+05:00` against `Z` compares wrongly. The
+  library does not parse dates. `proposedAt` is not read.
+- **No deduplication.** Repeated observation rows and repeated pairs are
+  counted each time. Deduplicate before calling if repeats are errors.
+- **Exact string matching.** `subjectId`, `checkKey` and judgments are
+  compared exactly. A whitespace-only judgment counts as a judgment.
+- **Disagreement is a place to look.** Divergence says one judge is wrong,
+  not which one; that needs `laterOutcome`, and `calibration` refuses until
+  enough outcomes exist.
+
+## Prior art
+
+This library does not claim the idea is new. Closely related work:
+
+- **Forecast Value Added** (demand planning). Michael Gilliland defined FVA
+  in 2002 as the change in a forecast accuracy metric attributable to a step
+  or participant in the forecasting process, starting from a naive forecast;
+  manual overrides are one of the steps it measures
+  ([Petropoulos et al., "Forecasting: theory and practice", section by Gilliland](https://arxiv.org/abs/2012.03854);
+  [SAS white paper](https://www.sas.com/en/whitepapers/forecast-value-added-analysis-106186.html)).
+  Gilliland's own guidance warns that over short periods FVA can be high or
+  low by chance, as quoted in a
+  [2024 Foresight critique of FVA](https://www.lokad.com/pdf/doherty-critical-evaluation-forecast-value-added-2024.pdf).
+  `gradeDecision` is closest to this.
+- **Override-appropriateness review** in clinical decision support. A 2020
+  systematic review of 23 studies
+  ([Poly et al., JMIR Medical Informatics](https://pmc.ncbi.nlm.nih.gov/articles/PMC7400042/))
+  covers how often prescribing alerts are overridden and whether the
+  overrides were appropriate, which the included studies mostly judged with
+  clinician raters (pharmacists, physicians) against published guidance.
+  `computeDivergence` is closest to this.
+- **Netflix RecSysOps.** Netflix's 2022 write-up on operating its
+  recommender
+  ([Saberian and Basilico, Netflix Technology Blog](https://netflixtechblog.medium.com/recsysops-best-practices-for-operating-a-large-scale-recommender-system-95bbe195a841))
+  treats a member choosing an item the model did not rank highly as a
+  potential issue to monitor. That is a similar idea to counting
+  engine-versus-human disagreement.
+
+## Related
+
+[honesty-mcp](https://github.com/lkopietz3-byte/honesty-mcp) exposes this
+kit to MCP clients as two tools, `grade_decision` (wraps `gradeDecision`)
+and `compute_divergence` (wraps `computeDivergence`).
 
 ## License
 

@@ -123,6 +123,35 @@ describe('computeDivergence — floors', () => {
     expect(describeDivergence(overall)).toContain('refused')
   })
 
+  it('checks the rate floor against the exact ratio, not the rounded display rate', () => {
+    // 5 of 101 is 0.0495..., which displays as 0.05 after rounding. It is still
+    // below a 0.05 floor and must be refused.
+    const { overall } = computeDivergence([...agree(96), ...overruled(5, 'remove')])
+
+    expect(overall.divergentRate).toBe(0.05)
+    expect(overall.status).toBe('refused')
+    expect(overall.refusalCodes).toEqual(['divergent_rate_below_minimum'])
+  })
+
+  it('rounds exact halves up, the same way for every denominator', () => {
+    // 1 of 80 is 0.0125 and 3 of 80 is 0.0375. Both are exact halves at the
+    // third decimal. Rounding through binary floating point sent the first up
+    // (0.013) and the second down (0.037).
+    expect(computeDivergence([...agree(79), ...overruled(1)]).overall.divergentRate).toBe(0.013)
+    expect(computeDivergence([...agree(77), ...overruled(3)]).overall.divergentRate).toBe(0.038)
+  })
+
+  it('reports a rate exactly at the floor', () => {
+    // 5 of 100 is exactly 0.05 and 7 of 100 is exactly 0.07: at the floor passes.
+    expect(computeDivergence([...agree(95), ...overruled(5, 'remove')]).overall.status).toBe(
+      'reportable',
+    )
+    expect(
+      computeDivergence([...agree(93), ...overruled(7, 'remove')], { minDivergentRate: 0.07 })
+        .overall.status,
+    ).toBe('reportable')
+  })
+
   it('rejects a nonsensical rate floor', () => {
     expect(() => resolveDivergenceConfig({ minDivergentRate: 1.5 })).toThrow(RangeError)
     expect(() => resolveDivergenceConfig({ minComparablePairs: 0 })).toThrow(RangeError)
@@ -223,6 +252,21 @@ describe('computeDivergence — grouping', () => {
     expect(result.groups.map((g) => g.group)).toEqual(['engine-said-keep', 'engine-said-remove'])
     expect(result.groups[1]?.comparablePairs).toBe(5)
     expect(result.groups[1]?.divergentCount).toBe(5)
+  })
+
+  it('treats undefined from groupBy like null, instead of making a group called undefined', () => {
+    const result = computeDivergence([...agree(15, 'images'), ...overruled(5, 'remove')], {
+      groupBy: (pair) => pair.group as string,
+    })
+
+    expect(result.groups.map((g) => g.group)).toEqual(['images'])
+    expect(result.overall.totalPairs).toBe(20)
+  })
+
+  it('throws when groupBy returns something other than a string, null or undefined', () => {
+    expect(() =>
+      computeDivergence(agree(3), { groupBy: () => 1 as unknown as string }),
+    ).toThrow(/groupBy must return a string or null, received 1/)
   })
 
   it('leaves a pair out of the breakdown when groupBy returns null', () => {
