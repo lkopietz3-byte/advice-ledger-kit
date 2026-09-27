@@ -7,6 +7,10 @@
 - Only `exposed === true` post-decision observations decide the headline.
   `secondary` is labeled non-headline and its `wouldBeVerdict` applies the
   same floors.
+- `holding` requires both a count below `refuteThreshold` AND an exposed bad
+  rate not higher than the baseline's; either failing gives `not-holding`.
+  The rate check cross-multiplies the raw counts, never the rounded `badRate`
+  or `badRateDelta` fields.
 - `refuteThreshold >= proposeThreshold`, or `resolveGradeConfig` throws.
 - Divergence needs the comparable-pair, count and rate floors; the rate floor
   uses the exact ratio, never the rounded display rate.

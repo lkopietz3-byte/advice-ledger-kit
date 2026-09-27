@@ -40,5 +40,13 @@ First release. Not yet published to npm.
   everything since the decision.
 - `DEFAULT_GRADE_CONFIG` and `DEFAULT_DIVERGENCE_CONFIG` are typed `Readonly`
   to match `Object.freeze`.
+- `gradeDecision` (and `secondary.wouldBeVerdict`) now return `'not-holding'`
+  when the exposed bad rate is higher than the baseline's, even if the bad
+  count stays below `refuteThreshold`. 1 of 10 before and 1 of 3 exposed
+  since used to be `'holding'`; it is now `'not-holding'`. The comparison is
+  exact (cross-multiplied counts), not the rounded `badRate` shown for
+  display, so it can disagree with the sign of `badRateDelta` right at a
+  rounding boundary. `describeGrade`'s sentence format is unchanged: it
+  already prints both windows' raw counts.
 
 [0.1.0]: https://github.com/lkopietz3-byte/advice-ledger-kit

@@ -112,23 +112,29 @@ exposure-blind grader would have said `not-holding`.
    and are counted in `atBoundaryObservations`. Dates are compared as strings.
 4. **Floors.** Each failing floor adds a code, and all failing floors are
    listed together.
-5. **Verdict.** If no floor fails: `not-holding` when the result has at least
-   `refuteThreshold` bad observations, otherwise `holding`.
+5. **Verdict.** If no floor fails: `not-holding` when EITHER the result has
+   at least `refuteThreshold` bad observations OR its bad rate is higher than
+   the baseline's, otherwise `holding`.
 
-The verdict is a count, not a rate comparison. `holding` does not mean the
-bad rate went down: 1 bad of 10 before and 1 bad of 3 since is `holding` at
-the default bar, with `badRateDelta: 0.233`. Show `badRateDelta` and the raw
-counts next to the verdict.
+The rate check is exact: it compares the raw counts by cross-multiplication
+(`result.bad * baseline.observations` against
+`baseline.bad * result.observations`), never the rounded `badRate` fields or
+the sign of `badRateDelta`. That matters right at a rounding boundary: 81 bad
+of 650 before (0.1246...) and 1 bad of 8 exposed since (0.125 exactly) both
+display as `badRate: 0.125`, so `badRateDelta` shows `0`, and yet the exposed
+rate is a hair higher than the baseline's, so the verdict is `not-holding`.
+Show `badRateDelta` and the raw counts next to the verdict; do not re-derive
+the verdict from `badRateDelta`'s sign.
 
 The verdict grades the decision and reads the same either way the human
 called it:
 
-| Decision | Exposed bad readings after | Verdict |
+| Decision | Exposed bad count and rate after | Verdict |
 | --- | --- | --- |
-| adopted | fewer than `refuteThreshold` | `holding` |
-| adopted | at least `refuteThreshold` | `not-holding` |
-| dismissed | fewer than `refuteThreshold` | `holding` (the pass looks fine) |
-| dismissed | at least `refuteThreshold` | `not-holding` (the evidence sided with the advice) |
+| adopted | count below `refuteThreshold` AND rate not above baseline | `holding` |
+| adopted | count at/above `refuteThreshold` OR rate above baseline | `not-holding` |
+| dismissed | count below `refuteThreshold` AND rate not above baseline | `holding` (the pass looks fine) |
+| dismissed | count at/above `refuteThreshold` OR rate above baseline | `not-holding` (the evidence sided with the advice) |
 
 For a dismissed recommendation, set `exposed: true` on occasions where the
 advice would have applied had it been adopted.
@@ -262,8 +268,9 @@ Grades one decision as described above. Returns `verdict`, `refusalCodes`,
 the `baseline`, `result` and `secondary` windows (`observations`, `bad`,
 `good`, `badRate` rounded to 3 places with exact halves up, `null` when
 empty), `badRateDelta` (`result.badRate - baseline.badRate` from the rounded
-rates, `null` when either window is empty), `atBoundaryObservations`, the
-echoed `thresholds`, and constant `method` and
+rates, `null` when either window is empty — display only, not what the
+verdict's rate check compares), `atBoundaryObservations`, the echoed
+`thresholds`, and constant `method` and
 `interpretation: 'association_not_causation'` labels.
 
 Throws `RangeError`/`TypeError` from `resolveGradeConfig`, and `TypeError`
@@ -338,8 +345,11 @@ shipped `.d.ts` files.
   mean, and extra attention to the subject are all possible explanations.
 - **No statistics beyond counts.** The floors are minimum counts, not
   significance tests. Clearing them means "enough to look at", not "proven".
-- **The verdict ignores the rate.** See above: `holding` can come back while
-  the bad rate rose. Read `badRateDelta`.
+- **The rate check only compares two windows, not a trend.** `holding`
+  requires the exposed bad rate not to exceed the baseline's, but that is one
+  before/after comparison, not a slope or a significance test. A rate that
+  crept up gradually across a long post-decision window and a rate that
+  spiked on day one look the same to this check.
 - **The window is whatever you pass.** There is no time limit on the
   post-decision window, so a long window will eventually reach any count.
 - **It will often refuse.** With the default floors, a decision needs at

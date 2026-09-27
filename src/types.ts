@@ -117,15 +117,23 @@ export interface Observation {
 // ---------------------------------------------------------------------------
 
 /**
- * 'holding'     — every floor is met and the exposed post-decision window has
- *                 fewer than `refuteThreshold` bad observations.
- * 'not-holding' — every floor is met and the exposed post-decision window has
- *                 at least `refuteThreshold` bad observations.
+ * 'holding'     — every floor is met, the exposed post-decision window has
+ *                 fewer than `refuteThreshold` bad observations, AND its bad
+ *                 rate is not higher than the baseline's.
+ * 'not-holding' — every floor is met and EITHER the exposed post-decision
+ *                 window has at least `refuteThreshold` bad observations, OR
+ *                 its bad rate is higher than the baseline's, even below
+ *                 that count (1 of 10 before, 1 of 3 exposed since is
+ *                 `not-holding`, not `holding`, despite the count staying
+ *                 under the default bar of 2).
  * 'refused'     — a floor or a structural check failed. Read `refusalCodes`.
  *
- * The verdict is a count against `refuteThreshold`, not a comparison of bad
- * rates. 'holding' can come back while the bad rate went up (1 of 10 before,
- * 1 of 3 since); read `badRateDelta` for the direction.
+ * The rate comparison is exact: it cross-multiplies the raw counts
+ * (`result.bad * baseline.observations` against
+ * `baseline.bad * result.observations`) rather than comparing the rounded
+ * `badRate` fields or the sign of `badRateDelta`. Two rates can display the
+ * same 3-place `badRate` while differing underneath, and the verdict follows
+ * the exact comparison, not the display, right at that boundary.
  */
 export type DecisionVerdict = 'holding' | 'not-holding' | 'refused'
 
@@ -226,9 +234,10 @@ export interface SecondaryReading extends WindowReading {
   label: 'secondary-not-the-headline'
   /**
    * What the verdict would have been if exposure were ignored: the same
-   * floors and refute bar, applied with every post-decision observation
-   * treated as exposed. 'refused' when that exposure-blind grade would also
-   * fail a floor, and on every structural refusal.
+   * floors, refute bar and baseline-rate check, applied with every
+   * post-decision observation treated as exposed. 'refused' when that
+   * exposure-blind grade would also fail a floor, and on every structural
+   * refusal.
    */
   wouldBeVerdict: DecisionVerdict
   interpretation: 'exposure_unaligned_descriptive_only'
@@ -268,8 +277,10 @@ export interface DecisionGrade {
   /**
    * `result.badRate - baseline.badRate`, using the two rounded rates shown, so
    * it can differ from the unrounded difference by up to 0.001. Negative means
-   * the rate went down. `null` when either window is empty. Does not affect
-   * the verdict.
+   * the rate went down. `null` when either window is empty. This is a display
+   * value only: the verdict's own rate check (see `DecisionVerdict`) compares
+   * the exact unrounded counts, so a grade can be `'not-holding'` on a rate
+   * increase while `badRateDelta` shows 0 or even a small negative number.
    */
   badRateDelta: number | null
   /** All post-decision observations, exposed or not. Explicitly not the headline. */
