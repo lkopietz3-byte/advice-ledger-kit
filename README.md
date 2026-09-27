@@ -33,8 +33,9 @@ npm install advice-ledger-kit
 ```
 
 Or build from source: clone the repository and run `npm install && npm run build`.
-It is ESM only, has no runtime dependencies, ships TypeScript declarations,
-and needs Node 20 or later.
+It ships as ESM; `require()` also works on Node versions that support
+`require(esm)` (20.19+, 22.12+). It has no runtime dependencies, ships
+TypeScript declarations, and needs Node 20 or later.
 
 ## Quickstart
 
