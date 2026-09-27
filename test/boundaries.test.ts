@@ -80,11 +80,36 @@ describe('grade floors at, below and above the threshold', () => {
     expect(verdict(4)).toBe('not-holding')
   })
 
-  it('returns holding while the bad rate went up, because the verdict is a count', () => {
-    // 1 of 10 before, 1 of 3 exposed since: below the refute bar of 2.
+  it('returns not-holding when the exposed rate exceeds the baseline, even below the count bar', () => {
+    // 1 of 10 before (0.1), 1 of 3 exposed since (0.333): the count is below
+    // the refute bar of 2, but the exposed rate is higher than the baseline's,
+    // so the decision does not hold.
     const grade = gradeDecision(dec, rec, [...before(1, 9), ...after(1, 2)])
-    expect(grade.verdict).toBe('holding')
+    expect(grade.verdict).toBe('not-holding')
     expect(grade.badRateDelta).toBe(0.233)
+  })
+
+  it('holds when the exposed rate is lower or exactly equal, never higher, than the baseline', () => {
+    // 4 of 8 before (0.5), 1 of 4 exposed since (0.25): rate went down, count
+    // (1) below the bar. Holds.
+    expect(gradeDecision(dec, rec, [...before(4, 4), ...after(1, 3)]).verdict).toBe('holding')
+    // 1 of 8 before (0.125), 1 of 8 exposed since (0.125): exact tie is not
+    // "higher", so it still holds.
+    expect(gradeDecision(dec, rec, [...before(1, 7), ...after(1, 7)]).verdict).toBe('holding')
+  })
+
+  it('compares the exact ratio, not the rounded badRate, when they disagree', () => {
+    // 81 of 650 before is exactly 0.124615..., which rounds to the same
+    // displayed 0.125 as 1 of 8 exposed since. The displayed rates are equal,
+    // but the exposed rate (1/8 = 0.125 exactly) is a hair higher than the
+    // baseline's (81/650), so the decision does not hold. A comparison of the
+    // rounded `badRate` fields (0.125 vs 0.125) would have missed this,
+    // exactly the class of bug the rate floor had.
+    const grade = gradeDecision(dec, rec, [...before(81, 650 - 81), ...after(1, 7)])
+    expect(grade.baseline.badRate).toBe(0.125)
+    expect(grade.result.badRate).toBe(0.125)
+    expect(grade.badRateDelta).toBe(0)
+    expect(grade.verdict).toBe('not-holding')
   })
 
   it('reports badRateDelta as the difference of the rounded rates shown', () => {

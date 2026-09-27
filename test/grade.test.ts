@@ -536,11 +536,13 @@ describe('gradeDecision — symmetric propose and refute thresholds', () => {
   it('allows a refute bar above the propose bar', () => {
     const config = { proposeThreshold: 2, refuteThreshold: 4 }
     expect(resolveGradeConfig(config).refuteThreshold).toBe(4)
+    // 3 bad of 5 (0.6) stays below the baseline rate (4 of 6, 0.667), so only
+    // the count bar is being exercised here, not the rate check.
     expect(
       gradeDecision(
         adopted,
         recommendation,
-        [...baseline4of6(), ...exposedAfter(['bad', 'bad', 'bad', 'good'])],
+        [...baseline4of6(), ...exposedAfter(['bad', 'bad', 'bad', 'good', 'good'])],
         config,
       ).verdict,
     ).toBe('holding')

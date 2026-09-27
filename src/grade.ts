@@ -6,8 +6,11 @@
 //   - It requires a BASELINE from before the decision with enough
 //     observations and at least one bad one. "No problems since you adopted
 //     this" is only worth grading when there were problems to begin with.
-//     The verdict itself counts bad exposed observations after the decision;
-//     the before/after rate change is reported in `badRateDelta`.
+//     The verdict combines a count check (fewer than `refuteThreshold` bad
+//     exposed observations since the decision) with a rate check (the
+//     exposed bad rate is not higher than the baseline's, compared as an
+//     exact ratio, never the rounded `badRate`/`badRateDelta` shown for
+//     display): either one failing makes the decision 'not-holding'.
 //
 //   - It applies floors to the baseline window, the post-decision window, and
 //     the exposed post-decision window SEPARATELY, because they fail for
@@ -35,7 +38,7 @@ import type {
   SecondaryReading,
   WindowReading,
 } from './types.js'
-import { difference3, rate, requireCount, shown, typeFail } from './internal.js'
+import { difference3, rate, rateHigherThan, requireCount, shown, typeFail } from './internal.js'
 
 /**
  * The defaults every unspecified `GradeConfig` field falls back to: 3/3/3
@@ -66,6 +69,29 @@ function readWindow(observations: readonly Observation[]): WindowReading {
 }
 
 const emptyWindow = (): WindowReading => ({ observations: 0, bad: 0, good: 0, badRate: null })
+
+/**
+ * 'not-holding' when the window has at least `refuteThreshold` bad
+ * observations, OR when its exact bad rate is higher than `baseline`'s,
+ * even below that count. Otherwise 'holding'.
+ *
+ * The rate check is exact (cross-multiplication in `rateHigherThan`), not a
+ * comparison of the rounded `badRate` fields, so two rates that display the
+ * same 3-place value but differ underneath still compare correctly. It never
+ * returns 'refused': callers only reach this once the floors that make
+ * `baseline` non-empty have already passed.
+ */
+function verdictFor(
+  window: WindowReading,
+  baseline: WindowReading,
+  thresholds: ResolvedGradeConfig,
+): DecisionVerdict {
+  if (window.bad >= thresholds.refuteThreshold) return 'not-holding'
+  if (rateHigherThan(window.bad, window.observations, baseline.bad, baseline.observations)) {
+    return 'not-holding'
+  }
+  return 'holding'
+}
 
 /**
  * Fill in defaults and reject a config that is asymmetric in the wrong
@@ -196,12 +222,15 @@ function secondaryFrom(window: WindowReading, wouldBeVerdict: DecisionVerdict): 
  *   dismissed + the problem came back    -> 'not-holding'  (the evidence sided with the advice)
  *
  * "The problem came back" means at least `refuteThreshold` bad observations in
- * the exposed post-decision window. It is a count, not a rate: 'holding' does
- * not mean the bad rate went down (see `badRateDelta`), and because the
+ * the exposed post-decision window, OR the exposed bad rate is higher than
+ * the baseline's, even below that count. The rate comparison is exact
+ * (cross-multiplication, see `rateHigherThan` in `internal.ts`), so it can
+ * disagree with a comparison of the rounded `badRate` fields, or with the
+ * sign of `badRateDelta`, right at a rounding boundary. Because the
  * post-decision window is every observation you pass, a long enough window
- * with any recurrence rate will eventually reach the bar. Pass a bounded
- * window if that matters. Anything short of every floor being met returns
- * 'refused' with the specific codes attached, and no verdict at all.
+ * with any recurrence rate will eventually reach the count bar. Pass a
+ * bounded window if that matters. Anything short of every floor being met
+ * returns 'refused' with the specific codes attached, and no verdict at all.
  *
  * Pure: reads its inputs, never modifies them, and gives the same result for
  * any order of `observations`. Observations are not deduplicated.
@@ -309,11 +338,7 @@ export function gradeDecision(
     after.length < thresholds.minExposedResultObservations
   const secondary = secondaryFrom(
     unaligned,
-    unalignedRefused
-      ? 'refused'
-      : unaligned.bad >= thresholds.refuteThreshold
-        ? 'not-holding'
-        : 'holding',
+    unalignedRefused ? 'refused' : verdictFor(unaligned, baseline, thresholds),
   )
 
   const refusalCodes: GradeRefusalCode[] = []
@@ -353,7 +378,7 @@ export function gradeDecision(
 
   return {
     ...base,
-    verdict: result.bad >= thresholds.refuteThreshold ? 'not-holding' : 'holding',
+    verdict: verdictFor(result, baseline, thresholds),
     refusalCodes: [],
     baseline,
     result,

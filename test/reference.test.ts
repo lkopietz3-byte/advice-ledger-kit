@@ -129,8 +129,18 @@ function refGrade(
     aN < c.minResultObservations ||
     aN < c.minExposedResultObservations
 
+  // Exact rate comparison by cross-multiplication (BigInt, so there is no
+  // question of it sharing a rounding shortcut with the real code):
+  // eBad/eN > bBad/bN  <=>  eBad*bN > bBad*eN.
+  const exposedRateHigher = BigInt(eBad) * BigInt(bN) > BigInt(bBad) * BigInt(eN)
+  const blindRateHigher = BigInt(aBad) * BigInt(bN) > BigInt(bBad) * BigInt(aN)
+
   return {
-    verdict: (codes.length > 0 ? 'refused' : eBad >= c.refuteThreshold ? 'not-holding' : 'holding'),
+    verdict: (codes.length > 0
+      ? 'refused'
+      : eBad >= c.refuteThreshold || exposedRateHigher
+        ? 'not-holding'
+        : 'holding'),
     refusalCodes: codes,
     baseline: { observations: bN, bad: bBad, good: bN - bBad, badRate: refRate(bBad, bN) },
     result: { observations: eN, bad: eBad, good: eN - eBad, badRate: refRate(eBad, eN) },
@@ -139,7 +149,11 @@ function refGrade(
       bad: aBad,
       good: aN - aBad,
       badRate: refRate(aBad, aN),
-      wouldBeVerdict: (blindRefused ? 'refused' : aBad >= c.refuteThreshold ? 'not-holding' : 'holding'),
+      wouldBeVerdict: (blindRefused
+        ? 'refused'
+        : aBad >= c.refuteThreshold || blindRateHigher
+          ? 'not-holding'
+          : 'holding'),
     },
     badRateDelta:
       bN === 0 || eN === 0 ? null : Number(thousandths(eBad, eN) - thousandths(bBad, bN)) / 1000,

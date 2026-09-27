@@ -30,6 +30,22 @@ export function difference3(a: number, b: number): number {
   return Math.round((a - b) * 1000) / 1000
 }
 
+/**
+ * Whether `bad1 / whole1` is a strictly higher rate than `bad2 / whole2`,
+ * compared as an exact rational via cross-multiplication rather than
+ * floating-point division. Two rates can round to the same 3-place `badRate`
+ * while differing exactly (the same class of bug the rate floor had), so this
+ * never divides and never looks at a rounded value.
+ *
+ * Both `whole1` and `whole2` must be positive integers; the caller is
+ * responsible for that (this is an internal helper, not a general-purpose
+ * comparator). Counts this library deals with are small enough that the
+ * cross-multiplication stays within `Number.MAX_SAFE_INTEGER`.
+ */
+export function rateHigherThan(bad1: number, whole1: number, bad2: number, whole2: number): boolean {
+  return bad1 * whole2 > bad2 * whole1
+}
+
 /** Throw a TypeError with the package prefix. */
 export function typeFail(message: string): never {
   throw new TypeError(`advice-ledger-kit: ${message}`)
