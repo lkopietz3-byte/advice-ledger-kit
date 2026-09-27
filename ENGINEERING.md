@@ -48,11 +48,14 @@ implementation on seeded random inputs.
 
 ## Release and rollback
 
-- Version stays 0.1.0 until the first npm publish. Update `CHANGELOG.md`
-  and, for export changes, run `node scripts/verify-package.mjs --update-api`
-  and review the diff.
+- `npm run verify` (lint, typecheck, test, build, verify:package) runs
+  automatically before publish via the `prepublishOnly` script.
+- Before a release: update `CHANGELOG.md` and, for export changes, run
+  `node scripts/verify-package.mjs --update-api` and review the diff, then
+  `npm publish`.
 - A change to a refusal code, verdict rule or sentence format affects
   honesty-mcp (`grade_decision`, `compute_divergence`); note it in the
   changelog.
-- Rollback: revert the commit, or pin consumers to the previous git tag or
-  commit. Nothing here migrates data.
+- Rollback: npm allows `npm unpublish` only within 72 hours of publishing;
+  after that, publish a fixed patch version instead. Nothing here migrates
+  data.

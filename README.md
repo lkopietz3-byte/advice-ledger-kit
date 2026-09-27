@@ -28,17 +28,13 @@ cleaning of your log (it counts exactly what you pass).
 
 ## Install
 
-Not published to npm yet. Until then, install from GitHub (the repository
-needs to be readable by you):
-
 ```bash
-npm install github:lkopietz3-byte/advice-ledger-kit
+npm install advice-ledger-kit
 ```
 
-The package builds itself on install through its `prepare` script. Recent
-npm versions may warn that `prepare` is not covered by `allowScripts`; with
-npm 11.16 the build still ran. It is ESM only, has no runtime dependencies,
-ships TypeScript declarations, and needs Node 20 or later.
+Or build from source: clone the repository and run `npm install && npm run build`.
+It is ESM only, has no runtime dependencies, ships TypeScript declarations,
+and needs Node 20 or later.
 
 ## Quickstart
 
