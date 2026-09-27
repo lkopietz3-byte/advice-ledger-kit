@@ -1,6 +1,6 @@
 {
   "name": "advice-ledger-kit",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Grade decisions on a recommender's advice against later observations, refusing with machine-readable codes when before/after or exposure floors are not met, and measure engine-versus-human disagreement with engine-right and human-right counts kept separate.",
   "keywords": [
     "recommendation-evaluation",
@@ -29,7 +29,8 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
   "sideEffects": false,
