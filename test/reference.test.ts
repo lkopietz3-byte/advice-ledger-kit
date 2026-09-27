@@ -381,12 +381,18 @@ describe('computeDivergence against a naive reference implementation', () => {
   })
 
   it('checks the rate floor exactly at, just below and just above k/1000', () => {
-    // For every comparable count up to 400 and every floor k/1000, the real
-    // floor decision matches exact integer arithmetic.
+    // For comparable counts up to 400 and floors k/1000, the real floor
+    // decision matches exact integer arithmetic at the divergent counts that
+    // straddle the boundary k * comparable / 1000.
     for (let comparable = 1; comparable <= 400; comparable += 7) {
       for (let k = 1; k <= 200; k += 3) {
         const floor = k / 1000
-        for (let divergent = 0; divergent <= comparable; divergent += Math.max(1, Math.floor(comparable / 25))) {
+        const boundary = (k * comparable) / 1000
+        const candidates = new Set(
+          [Math.floor(boundary) - 1, Math.floor(boundary), Math.ceil(boundary), Math.ceil(boundary) + 1]
+            .filter((d) => d >= 0 && d <= comparable),
+        )
+        for (const divergent of candidates) {
           const pairs: JudgmentPair[] = [
             ...Array.from({ length: comparable - divergent }, () => ({ engineJudgment: 'a', humanJudgment: 'a' })),
             ...Array.from({ length: divergent }, () => ({ engineJudgment: 'a', humanJudgment: 'b' })),
