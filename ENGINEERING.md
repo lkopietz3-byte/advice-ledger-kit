@@ -20,6 +20,18 @@
 - Pure functions: inputs are never modified; results do not depend on input
   order (except `examples`, which keep input order).
 - Rows the types forbid throw a `TypeError` instead of being miscounted.
+  Rows, decisions, recommendations and configs must be plain objects; arrays
+  must be dense; a blank id or an invisible-only `checkKey` never matches.
+- Caller input is read once. Each field of a row, pair, decision,
+  recommendation or config is read a single time and everything after that
+  works on the copy.
+- Windows are decided by parsed instants, never by comparing timestamp text.
+  A date is UTC midnight, a timestamp needs an explicit zone, an impossible
+  or malformed date throws a `RangeError`, and equal instants sit on the
+  boundary whatever their string form.
+- Text output (`describeGrade`, `describeDivergence`) escapes caller strings,
+  stays on one line, and never prints a structural refusal's zero windows as
+  measurements. The JSON is the contract; the sentences are not.
 - Zero runtime dependencies.
 
 ## Set up and verify
@@ -29,6 +41,12 @@ npm ci
 npm run verify   # lint, typecheck, test, build, verify:package
 npm audit --include=dev
 ```
+
+Mutation testing is run by hand, not in CI: `npm i -D --no-save
+@stryker-mutator/core @stryker-mutator/vitest-runner` and a local
+`stryker.config.json` (not committed) with the vitest runner and
+`mutate: ["src/**/*.ts"]`. At 0.2.0 it scored 100% (867 killed, none
+survived); v8 coverage is 100% of lines.
 
 `verify:package` packs the tarball, installs it into an empty project,
 checks the exported names against `api-surface.json`, runs
@@ -41,8 +59,9 @@ implementation on seeded random inputs.
 
 - No statistical inference: floors are minimum counts, not significance
   tests or intervals. Results are associations, not causal effects.
-- Dates are compared as strings; mixed formats or UTC offsets give wrong
-  windows and are not detected.
+- Time zones you did not supply: a zoneless timestamp is rejected, not
+  guessed, and a bare date is UTC midnight. A source that exported local time
+  without a zone must be converted before calling.
 - No deduplication of observations or pairs.
 - `exposed` and `laterOutcome` are trusted as given.
 
@@ -64,8 +83,8 @@ points).
 publish via the `prepublishOnly` script, so a broken build cannot reach the registry by
 accident. To release: add a dated entry to `CHANGELOG.md`, bump `version` in
 `package.json`, commit, and push a `vX.Y.Z` tag that matches the new version, then let
-`.github/workflows/release.yml` install, verify, and publish it. (You can also run
-`npm publish` locally; `prepublishOnly` still guards it.)
+`.github/workflows/release.yml` audit, verify, check types, and publish it. (You can
+also run `npm publish` locally; `prepublishOnly` still guards it.)
 
 npm's unpublish policy is deliberately narrow. Within 72 hours of publishing, a version can be
 unpublished only if no other published package depends on it. After 72 hours, unpublishing also
@@ -75,8 +94,10 @@ not, even after an unpublish. Treat unpublish as unavailable: prefer fixing forw
 patch version, and use `npm deprecate <name>@"<range>" "<message>"` to warn consumers off a
 bad release while it stays installable for anyone already pinned to it.
 
-A change to a refusal code, verdict rule, or sentence format affects `honesty-mcp`
-(`grade_decision`, `compute_divergence`); note it in the changelog.
+A change to a refusal code, verdict rule, timestamp rule, input validation or sentence
+format affects `honesty-mcp` (`grade_decision`, `compute_divergence`); note it in the
+changelog. 0.2.0 changed all of these; `honesty-mcp` must mirror them (its `decidedAt`
+and `observedAt` schemas and tool descriptions still say dates compare as strings).
 
 ### Runtime support policy
 
@@ -87,7 +108,9 @@ A change to a refusal code, verdict rule, or sentence format affects `honesty-mc
   regressions, but that runtime gets no security fixes upstream; don't run production traffic
   on it.
 - CommonJS `require()` of this package needs Node >=20.19 or >=22.12 (`require(esm)`
-  support). ESM `import` works on every version this package tests (20, 22, 24).
+  support). ESM `import` works on every version this package tests (20, 22, 24). The
+  `compat` job also runs Node 20.19.0 and 22.12.0 pinned, the exact `require(esm)`
+  floors, and runs `scripts/verify-package.mjs`, which includes a CommonJS consumer probe.
 - `engines` in `package.json` is unchanged by this policy.
 
 ### Publishing with provenance
@@ -96,9 +119,10 @@ A change to a refusal code, verdict rule, or sentence format affects `honesty-mc
 `workflow_dispatch` or a pushed `v*` tag, requests a short-lived OIDC token instead of
 reading a stored npm token (`permissions: id-token: write`), and runs a plain `npm publish`
 with no token and no `--provenance` flag, because provenance attestation is generated
-automatically under trusted publishing. Before publishing, the workflow confirms the tag
-matches `package.json`'s `version` and checks whether that version is already on the
-registry, so re-running it on a version that's already published is a no-op rather than an
-error. Trusted publishing must be configured for this package on npmjs.com (linking it to this
+automatically under trusted publishing. Both triggers must run on a `v*` tag whose version
+matches `package.json` (a manual run from a branch fails). The workflow then runs the
+dependency audit, `npm run verify` and `npm run attw`. Finally it checks the registry: only a
+confirmed `E404` means "not published yet", an existing version is a no-op rather than an
+error, and any other registry error fails the job instead of guessing. Trusted publishing must be configured for this package on npmjs.com (linking it to this
 GitHub repository and the `release.yml` workflow) before the first automated release will
 work.

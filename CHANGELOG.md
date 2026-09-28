@@ -4,6 +4,104 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-09-28
+
+Minor release: inputs that used to be accepted now throw, and the text from
+`describeGrade` and `describeDivergence` is different. The JSON fields,
+refusal codes, verdict rules, thresholds and export names are unchanged.
+
+### Changed (breaking)
+
+- **Timestamps are parsed and compared as instants (AL-004).** `decidedAt`
+  and `observedAt` must be `YYYY-MM-DD` (UTC midnight) or a timestamp with
+  seconds and an explicit `Z` or `+hh:mm` zone (up to three fractional
+  digits), the same grammar as freshness-kit. A non-empty string outside
+  that grammar, or naming a day that does not exist, throws a `RangeError`
+  (`2026-99-99`, `2025-02-29`, `2026-02-01T09:30:00`). Windows still use
+  "strictly before" and "strictly after", and equal instants still grade
+  neither window, but equality now holds across string forms:
+  `...00Z`, `...00.000Z`, `...+00:00` and `...T01:00:00+01:00` are the same
+  instant, and `2026-02-01T00:30:00+01:00` is now before
+  `2026-02-01T00:00:00Z` (it used to sort after it). A date-only `decidedAt`
+  now equals an observation at `T00:00:00Z` (that observation used to count as
+  after the decision). An
+  empty or non-string date still throws a `TypeError`. The echoed
+  `decidedAt` keeps the string you passed.
+- **Input must be plain and dense.** Observation rows, pairs, decisions,
+  recommendations and configs must be plain or null-prototype objects: a
+  `Map`, `Date`, array or class instance throws a `TypeError` instead of being
+  read as empty or as "use the defaults". `observations` and `pairs` must be
+  arrays without holes. A `null` config throws; `undefined` still means the
+  defaults. `groupBy`, when present, must be a function.
+- **Blank identity is rejected.** An empty, whitespace-only or invisible-only
+  `recommendation.id`, `recommendation.subjectId` or
+  `decision.recommendationId` throws a `TypeError` (a blank id used to match a
+  blank id). A `checkKey` that shows nothing, including zero-width and bidi
+  control characters that `trim()` missed, is refused as
+  `no_gradeable_check_key`.
+- **`computeDivergence` returns copies in `examples`**, not your own pair
+  objects, and hands `groupBy` the same copy. Each pair field is read once.
+- **Text output changed (AL-001, AL-002, AL-003).** Every sentence below is
+  new wording; match on the JSON instead of the text.
+  - `describeGrade`, thin evidence: `Refused to grade <check> on <subject>:
+    <codes>.` is now `Not enough evidence to grade <check> on <subject>.`
+    followed by before, after and confirmed-exposed-after counts against the
+    required counts, a note that only `exposed: true` counts, the next step,
+    `No conclusion about the decision is available from this record.` and
+    `Codes: <codes>.` A baseline with no bad observation gets its own line and
+    a note that a quiet period afterward says nothing about the
+    recommendation; it is never told to add bad observations.
+  - `describeGrade`, invalid input: `Cannot grade <check> on <subject>: the
+    supplied record cannot be graded, so no observations were measured.` plus
+    one sentence per structural code. The zero windows are not printed.
+  - `describeGrade`, verdicts: the old sentence is kept as the first sentence,
+    then which rule decided (`The exposed bad count (n) reached the refute
+    threshold (t).`, or the exact-rate explanation including `Both display as
+    <rate>; the exact counts decide, not the rounded display.`), then `This is
+    an association between two windows, not evidence that the recommendation
+    caused the change.`
+  - `describeDivergence`, reportable with calibration: `... the engine was
+    right E and the human was right H.` is now `... the engine was right E,
+    the human was right H and neither was right N.` plus how many
+    disagreements are unresolved and a note that the counts do not show causal
+    benefit or general accuracy.
+  - `describeDivergence`, calibration withheld: `... (<codes>); N
+    disagreements have an outcome.` is now `... (<codes>): N of D
+    disagreements have a later outcome.` plus the same note.
+  - `describeDivergence`, refused: the old sentence is kept, then `Short on:
+    ...` and `No conclusion about the engine or the human is available from
+    these pairs.`
+  - Caller strings in all text output are escaped: control characters, line
+    and paragraph separators, bidi and other format characters, and lone
+    surrogates print as `\n`, `\t`, `\r` or `\u{HEX}`.
+
+### Added
+
+- `describeDivergence(report, thresholds?)`: an optional second argument (the
+  result's `thresholds`) that adds the required numbers to the text.
+- Error messages describe caller values without calling into them, are cut at
+  80 characters, and escape control characters, so a hostile value (a
+  null-prototype object, a `toString` that throws) can no longer replace the
+  error or forge its text.
+
+### Fixed
+
+- A `laterOutcome` or judgment read through a getter could differ between
+  reads and break `engineRight + humanRight + neitherRight`. Each field is now
+  read once.
+- Holes in `observations` or `pairs` were skipped by one pass and visited by
+  another. They now throw.
+- README, TSDoc and ENGINEERING: dates are no longer described as compared as
+  strings; the Node support wording is consistent (22 and 24 LTS and 26
+  recommended, 20 compatibility-tested only); the release workflow now
+  requires a tag on both triggers, runs the dependency audit and `attw`, and
+  treats only a confirmed `E404` as "not published".
+
+### Tests
+
+- Mutation score on `src/`: 97.44% at 0.1.1 (11 survived, 1 uncovered) to
+  100% (867 killed, none survived). v8 coverage: 100% of lines.
+
 ## [0.1.1] - 2026-09-27
 
 ### Added

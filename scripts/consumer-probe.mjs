@@ -36,7 +36,9 @@ assert.equal(grade.secondary.observations, 5);
 assert.equal(grade.secondary.wouldBeVerdict, 'not-holding');
 assert.equal(
   describeGrade(grade),
-  'Holding: seal-leak on pump-14 was bad in 4 of 6 observations before and 1 of 4 exposed observations since the recommendation was adopted on 2026-02-01.',
+  'Holding: seal-leak on pump-14 was bad in 4 of 6 observations before and 1 of 4 exposed observations since the recommendation was adopted on 2026-02-01. ' +
+    "The exposed bad count (1) is below the refute threshold (2) and its rate is not higher than the baseline's. " +
+    'This is an association between two windows, not evidence that the recommendation caused the change.',
 );
 
 // A thin log is refused with every unmet floor named.
@@ -44,6 +46,29 @@ const thin = gradeDecision(decision, recommendation, [row('2026-01-25', 'bad'), 
 assert.equal(thin.verdict, 'refused');
 assert.deepEqual(thin.refusalCodes, ['baseline_below_minimum', 'result_below_minimum', 'exposed_result_below_minimum']);
 assert.equal(thin.secondary.wouldBeVerdict, 'refused');
+// The sentence carries the actual and required counts, not only the codes.
+assert.equal(
+  describeGrade(thin),
+  'Not enough evidence to grade seal-leak on pump-14. ' +
+    'Before the decision: 1 observation, 3 required (not met). ' +
+    'After the decision: 1 observation, 3 required (not met). ' +
+    'Confirmed exposed after the decision: 1 observation, 3 required (not met). ' +
+    'Only observations marked exposed: true count toward the headline result; unmarked ones are not assumed exposed. ' +
+    'Next: check the supplied record and exposure flags, and include more valid observations if they exist; do not infer missing exposure. ' +
+    'No conclusion about the decision is available from this record. ' +
+    'Codes: baseline_below_minimum, result_below_minimum, exposed_result_below_minimum.',
+);
+
+// Timestamps compare as instants: 00:30+01:00 is the day before 00:00Z, and an
+// impossible date throws instead of grading.
+const mixed = gradeDecision(
+  { ...decision, decidedAt: '2026-02-01T00:00:00Z' },
+  recommendation,
+  [row('2026-02-01T00:30:00+01:00', 'bad'), row('2026-02-01T00:00:00.000Z', 'bad', true)],
+);
+assert.equal(mixed.baseline.observations, 1);
+assert.equal(mixed.atBoundaryObservations, 1);
+assert.throws(() => gradeDecision(decision, recommendation, [row('2026-99-99', 'bad')]), RangeError);
 
 // Refuting more cheaply than proposing throws.
 assert.throws(() => resolveGradeConfig({ proposeThreshold: 3, refuteThreshold: 2 }), RangeError);
@@ -77,7 +102,10 @@ assert.deepEqual(thresholds, resolveDivergenceConfig());
 assert.deepEqual(resolveDivergenceConfig(), { ...DEFAULT_DIVERGENCE_CONFIG });
 assert.equal(
   describeDivergence(groups[0]),
-  'Group images: the human disagreed on 6 of 40 comparable pairs. Of the 6 with a later outcome, the engine was right 4 and the human was right 2.',
+  'Group images: the human disagreed on 6 of 40 comparable pairs. ' +
+    'Of the 6 with a later outcome, the engine was right 4, the human was right 2 and neither was right 0. ' +
+    'No disagreement is still unresolved. ' +
+    'These counts compare supplied judgments with supplied outcomes; they do not show causal benefit or general accuracy.',
 );
 
 // The rate floor uses the exact ratio: 5 of 101 displays as 0.05 but is refused.

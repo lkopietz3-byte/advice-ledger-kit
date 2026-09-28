@@ -33,9 +33,20 @@ npm install advice-ledger-kit
 ```
 
 Or build from source: clone the repository and run `npm install && npm run build`.
-It ships as ESM; `require()` also works on Node versions that support
-`require(esm)` (20.19+, 22.12+). It has no runtime dependencies, ships
-TypeScript declarations, and needs Node 20 or later.
+It has no runtime dependencies and ships TypeScript declarations.
+
+It is an ESM package (`"type": "module"`). `import` is the supported way to
+load it. `require()` also works where Node can `require(esm)`:
+
+| How you load it | Node 20.19+ | Node 22.12+ | Node 24 and 26 | Older Node 20 or 22 |
+| --- | --- | --- | --- | --- |
+| `import { gradeDecision } from 'advice-ledger-kit'` | works | works | works | works |
+| `require('advice-ledger-kit')` | works | works | works | fails (no `require(esm)`); use `import()` |
+
+Recommended runtimes are Node 22 and 24 (LTS) and Node 26 (current). Node 20 is
+end-of-life. CI still runs the tests on Node 20.19.0 and 22.12.0 (the
+`require(esm)` floors) to catch regressions, but that is compatibility
+testing, not a recommendation. `engines` in `package.json` is `>=20`.
 
 ## Quickstart
 
@@ -70,11 +81,24 @@ console.log(grade.secondary.observations, grade.secondary.bad, grade.secondary.w
 console.log(describeGrade(grade))
 // Holding: seal-leak on pump-14 was bad in 4 of 6 observations before and
 // 1 of 4 exposed observations since the recommendation was adopted on 2026-02-01.
+// The exposed bad count (1) is below the refute threshold (2) and its rate is
+// not higher than the baseline's. This is an association between two windows,
+// not evidence that the recommendation caused the change.
 
 // The same call on a two-row log refuses and says why.
 const thin = gradeDecision(decision, recommendation, [row('2026-01-25', 'bad'), row('2026-02-08', 'good', true)])
 console.log(thin.verdict, thin.refusalCodes)
 // refused [ 'baseline_below_minimum', 'result_below_minimum', 'exposed_result_below_minimum' ]
+console.log(describeGrade(thin))
+// Not enough evidence to grade seal-leak on pump-14. Before the decision: 1
+// observation, 3 required (not met). After the decision: 1 observation, 3
+// required (not met). Confirmed exposed after the decision: 1 observation, 3
+// required (not met). Only observations marked exposed: true count toward the
+// headline result; unmarked ones are not assumed exposed. Next: check the
+// supplied record and exposure flags, and include more valid observations if
+// they exist; do not infer missing exposure. No conclusion about the decision
+// is available from this record. Codes: baseline_below_minimum,
+// result_below_minimum, exposed_result_below_minimum.
 
 // Divergence: 20 items both judges rated, 5 disagreements, all later settled.
 const pairs = [
@@ -84,8 +108,15 @@ const pairs = [
 ]
 console.log(describeDivergence(computeDivergence(pairs).overall))
 // Overall: the human disagreed on 5 of 20 comparable pairs. Of the 5 with a
-// later outcome, the engine was right 3 and the human was right 2.
+// later outcome, the engine was right 3, the human was right 2 and neither was
+// right 0. No disagreement is still unresolved. These counts compare supplied
+// judgments with supplied outcomes; they do not show causal benefit or general
+// accuracy.
 ```
+
+The text is on one line (wrapped here for reading). Every caller string in it
+is escaped, and the full JSON carries the same numbers, so show either or
+both.
 
 Read the output closely. The verdict is `holding` even though the problem
 recurred once: one bad exposed reading is below the default refute bar of 2.
@@ -95,18 +126,22 @@ exposure-blind grader would have said `not-holding`.
 ## How `gradeDecision` works
 
 1. **Structural checks first.** If `decision.recommendationId` does not equal
-   `recommendation.id`, the `checkKey` is empty or whitespace, or
+   `recommendation.id`, the `checkKey` shows nothing (empty, whitespace, or
+   only invisible characters such as a zero-width space), or
    `requireObservedBasis` is on and the basis is `'model-proposed'`, the grade
    is refused with only those codes. Nothing else is read, and the windows in
    the result are all-zero placeholders, not measurements.
 2. **Matching.** Only observations whose `subjectId` and `checkKey` exactly
-   equal the recommendation's are read. You can pass your whole log.
-3. **Windows.** Observations with `observedAt < decidedAt` form the
-   **baseline**. Observations with `observedAt > decidedAt` form the
-   post-decision window, and those with `exposed === true` form the
+   equal the recommendation's are graded, and only those are validated field
+   by field. You can pass your whole log, but every row must be a plain
+   object (see "Input rules").
+3. **Windows.** Timestamps are parsed and compared as instants. Observations
+   before `decidedAt` form the **baseline**. Observations after `decidedAt`
+   form the post-decision window, and those with `exposed === true` form the
    **result** (the headline). `exposed: false` and a missing flag both count
-   as not exposed. Observations exactly at `decidedAt` grade neither window
-   and are counted in `atBoundaryObservations`. Dates are compared as strings.
+   as not exposed. Observations at the same instant as `decidedAt`, however
+   the two are written, grade neither window and are counted in
+   `atBoundaryObservations`.
 4. **Floors.** Each failing floor adds a code, and all failing floors are
    listed together.
 5. **Verdict.** If no floor fails: `not-holding` when EITHER the result has
@@ -136,6 +171,53 @@ called it:
 For a dismissed recommendation, set `exposed: true` on occasions where the
 advice would have applied had it been adopted.
 
+### Input rules
+
+Timestamps (`decidedAt`, and `observedAt` on a matching observation) must be
+one of:
+
+- a calendar date, `2026-02-01`, read as UTC midnight;
+- a timestamp with seconds and an explicit zone: `2026-02-01T09:30:00Z`,
+  `2026-02-01T10:30:00+01:00`, at most three fractional digits.
+
+Anything else is a caller error, not a thin log: a non-empty string that does
+not fit (`2026-02-01T09:30:00` with no zone, `2026-02-01T09:30Z` with no
+seconds, `2026-99-99`, `2025-02-29`) throws a `RangeError`, and an empty or
+non-string value throws a `TypeError`. Nothing is guessed, so a missing zone is
+never read as local or UTC time. Two strings for the same moment are the same
+moment: with a decision at `2026-02-01T00:00:00.000Z`, observations at
+`2026-02-01T00:00:00Z`, `2026-02-01T00:00:00+00:00`,
+`2026-02-01T01:00:00+01:00` and `2026-02-01` all land on the boundary, and
+`2026-02-01T00:30:00+01:00` is half an hour before `2026-02-01T00:00:00Z`.
+The strings you pass are echoed back unchanged (`decidedAt` in the grade).
+
+```js
+// Uses `recommendation`, `decision` and `row` from the quickstart.
+const at = (observedAt) =>
+  gradeDecision({ ...decision, decidedAt: '2026-02-01T00:00:00.000Z' }, recommendation, [row(observedAt, 'bad', true)])
+
+console.log(at('2026-02-01T00:00:00Z').atBoundaryObservations)      // 1: same instant, different text
+console.log(at('2026-02-01T01:00:00+01:00').atBoundaryObservations) // 1
+console.log(at('2026-02-01T00:30:00+01:00').baseline.observations)  // 1: that is 23:30Z the day before
+try { at('2026-99-99') } catch (e) { console.log(e.name) }         // RangeError: fix the input, this is not a refusal
+```
+
+Other input rules, all `TypeError`s:
+
+- Rows and configs must be plain objects (or null-prototype objects). A `Map`,
+  `Date`, array, or class instance is rejected instead of being read as empty
+  or as "use the defaults". `observations` and `pairs` must be arrays with no
+  holes. Each field of each row is read once, and the result comes from that
+  single read.
+- `recommendation.id`, `recommendation.subjectId` and
+  `decision.recommendationId` must be strings that show something. A blank id
+  cannot match another blank id.
+- `groupBy`, when given, must be a function that returns a string, `null` or
+  `undefined`. A promise is not awaited; it is rejected.
+
+Repeated rows are counted as supplied; deduplicate before calling (see Honest
+limits).
+
 ### Refusal codes
 
 | Code | Kind | Fires when |
@@ -144,7 +226,7 @@ advice would have applied had it been adopted.
 | `baseline_lacks_negative_signal` | floor | baseline bad observations < `minBaselineBadObservations` (default 1). With a full baseline this means the problem was not happening before, so its absence afterward says nothing. An empty baseline triggers it too. |
 | `result_below_minimum` | floor | post-decision observations, exposed or not, < `minResultObservations` (default 3) |
 | `exposed_result_below_minimum` | floor | exposed post-decision observations < `minExposedResultObservations` (default 3) |
-| `no_gradeable_check_key` | structural | `checkKey` is empty, whitespace-only, or missing |
+| `no_gradeable_check_key` | structural | `checkKey` is missing, not a string, or shows nothing (empty, whitespace, zero-width or bidi control characters only) |
 | `basis_not_gradeable` | structural | `requireObservedBasis` is true and `basis` is `'model-proposed'` |
 | `decision_recommendation_mismatch` | structural | `decision.recommendationId !== recommendation.id` |
 
@@ -220,9 +302,11 @@ blended accuracy field. Calibration has its own floor,
 `minResolvedDivergent` (default 3), and its own `status`, which is
 independent of the report's status: a report can be refused on the rate
 floor while its calibration is reportable. `describeDivergence` leaves
-calibration out of the sentence for a refused report.
+calibration counts out of the text for a refused report.
 
-**Groups.** Pairs are bucketed by `group`, or by your `groupBy(pair)`. Return
+**Groups.** Pairs are bucketed by `group`, or by your `groupBy(pair)`, which
+receives a shallow copy of the pair (with any extra fields you put on it).
+`examples` are those copies, not your own objects. Return
 `null` or `undefined` to leave a pair out of the breakdown (it still counts
 in `overall`); any other non-string return throws a `TypeError`. Groups are
 sorted by key (plain `Array.prototype.sort`, not locale-aware) and each gets
@@ -241,13 +325,18 @@ const queue = [
 const { overall, groups } = computeDivergence(queue)
 console.log(describeDivergence(overall))
 // Overall: the human disagreed on 8 of 70 comparable pairs. Of the 8 with a
-// later outcome, the engine was right 4 and the human was right 4.
+// later outcome, the engine was right 4, the human was right 4 and neither was
+// right 0. No disagreement is still unresolved. These counts compare supplied
+// judgments with supplied outcomes; they do not show causal benefit or general
+// accuracy.
 console.log(describeDivergence(groups[0]))
 // Group images: the human disagreed on 6 of 40 comparable pairs. Of the 6 with
-// a later outcome, the engine was right 4 and the human was right 2.
+// a later outcome, the engine was right 4, the human was right 2 and neither
+// was right 0. No disagreement is still unresolved. These counts compare ...
 console.log(describeDivergence(groups[1]))
-// Group text: refused to report divergence (divergent_count_below_minimum);
-// 2 of 30 comparable pairs diverged.
+// Group text: refused to report divergence (divergent_count_below_minimum); 2
+// of 30 comparable pairs diverged. Short on: disagreements (2). No conclusion
+// about the engine or the human is available from these pairs.
 ```
 
 Overall the engine and the human tie at 4 each. By group, the images queue
@@ -270,17 +359,36 @@ verdict's rate check compares), `atBoundaryObservations`, the echoed
 `thresholds`, and constant `method` and
 `interpretation: 'association_not_causation'` labels.
 
-Throws `RangeError`/`TypeError` from `resolveGradeConfig`, and `TypeError`
-when `recommendation.id`, `recommendation.subjectId` or
-`decision.recommendationId` is not a string, `basis` is not `'observed'` or
-`'model-proposed'`, `status` is not `'adopted'` or `'dismissed'`,
-`decidedAt` is not a non-empty string, or a matching observation has a
-`state` other than `'good'`/`'bad'` or a missing `observedAt`.
+Throws `RangeError`/`TypeError` from `resolveGradeConfig`. Throws `RangeError`
+when `decidedAt`, or `observedAt` on a matching observation, is a non-empty
+string that is not a valid date or timestamp (see "Input rules"). Throws
+`TypeError` when the decision, recommendation, or a row is not a plain object,
+`observations` is not a dense array, `recommendation.id`,
+`recommendation.subjectId` or `decision.recommendationId` is not a string or
+is blank, `basis` is not `'observed'` or `'model-proposed'`, `status` is not
+`'adopted'` or `'dismissed'`, `decidedAt` is empty or not a string, or a
+matching observation has a `state` other than `'good'`/`'bad'` or an empty or
+non-string `observedAt`. Error messages describe caller values without ever
+calling into them, cut at 80 characters, and escape control characters.
 
 ### `describeGrade(grade) => string`
 
-One sentence: the verdict with both windows' counts, or "Refused to grade
-... :" followed by the codes verbatim.
+One line of plain text: result, evidence, reason, next step, limits.
+
+- A verdict reads "Holding: ... was bad in B of N observations before and b of
+  n exposed observations since the recommendation was adopted on ...", says
+  which rule decided (the count reaching `refuteThreshold`, or the exact rate
+  being higher than the baseline's, with a note when both rates display the
+  same), and ends with the association-not-causation note.
+- Thin evidence reads "Not enough evidence to grade ...", then before, after
+  and confirmed-exposed-after counts against the required counts (plus the
+  bad-before count when that floor failed), why it matters, what to check, and
+  the codes. It never suggests lowering a floor.
+- A structural refusal reads "Cannot grade ..." and explains the invalid
+  input. Its zero windows are placeholders and are not printed as counts.
+
+Caller strings are escaped. The JSON is unchanged and remains the source of
+truth.
 
 ### `resolveGradeConfig(config?) => ResolvedGradeConfig`
 
@@ -301,16 +409,21 @@ Frozen: `minBaselineObservations: 3`, `minResultObservations: 3`,
 Returns `{ overall, groups, thresholds }`. Each report has `group`,
 `totalPairs`, `comparablePairs`, `agreements`, `divergentCount`,
 `divergentRate`, `status`, `refusalCodes`, `calibration`, `examples` (the
-first `exampleLimit` divergent pairs, your own objects), and
+first `exampleLimit` divergent pairs, as shallow copies), and
 `interpretation: 'disagreement_is_a_signal_not_a_verdict'`. Pairs are not
 deduplicated, even when they share an `id`. Throws `RangeError` from
 `resolveDivergenceConfig` and `TypeError` for a bad `groupBy` return.
 
-### `describeDivergence(report) => string`
+### `describeDivergence(report, thresholds?) => string`
 
-One sentence for a report: refused with codes and raw counts; or the
-disagreement count plus either why calibration is withheld or the two
-separate hit counts.
+One line for a report. Refused: the codes and raw counts, what it is short
+on, and no conclusion. Reportable: the disagreement count, then either why
+calibration is withheld (with how many disagreements have an outcome) or the
+engine-right, human-right and neither-right counts (they add up to the
+resolved disagreements) and how many are still unresolved, plus a note that the
+counts compare supplied judgments with supplied outcomes. Pass the result's
+`thresholds` as the second argument to add the required numbers. The group
+name is escaped.
 
 ### `resolveDivergenceConfig(config?) => ResolvedDivergenceConfig`
 
@@ -358,10 +471,13 @@ shipped `.d.ts` files.
   If that period was unusual, nothing here detects it.
 - **`exposed` is trusted.** If exposure is logged more reliably on good
   occasions, that bias goes straight into the headline.
-- **Dates are strings.** Use one ISO-8601 format and one UTC offset for
-  every `decidedAt` and `observedAt`. `'2026-01-01'` sorts before
-  `'2026-01-01T00:00:00Z'`, and `+05:00` against `Z` compares wrongly. The
-  library does not parse dates. `proposedAt` is not read.
+- **Timestamps are yours to get right.** The library parses instants strictly
+  and throws on anything outside the grammar above, but it cannot know that a
+  bare `2026-02-01` you meant as local midnight is UTC midnight here, or that
+  a timestamp exported without its zone was really in local time. Convert
+  those at the boundary. Timestamps with more than three fractional digits
+  (for example microseconds) are rejected, so truncate them first.
+  `proposedAt` is not read.
 - **No deduplication.** Repeated observation rows and repeated pairs are
   counted each time. Deduplicate before calling if repeats are errors.
 - **Exact string matching.** `subjectId`, `checkKey` and judgments are
