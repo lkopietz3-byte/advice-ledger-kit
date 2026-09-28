@@ -29,7 +29,7 @@ import type {
   JudgmentPair,
   ResolvedDivergenceConfig,
 } from './types.js'
-import { rate, requireCount, shown, typeFail } from './internal.js'
+import { denseCopy, describe, isPlainRecord, rate, requireCount, requirePlainRecord, typeFail } from './internal.js'
 
 /**
  * The defaults every unspecified `DivergenceConfig` floor falls back to: 10
@@ -44,57 +44,69 @@ export const DEFAULT_DIVERGENCE_CONFIG: Readonly<ResolvedDivergenceConfig> = Obj
   exampleLimit: 10,
 })
 
-const spoke = (judgment: string | undefined): judgment is string =>
+const spoke = (judgment: unknown): judgment is string =>
   typeof judgment === 'string' && judgment.length > 0
 
 /**
  * Fill in defaults and reject nonsensical floors. `null` and `undefined`
- * fields fall back to the defaults. `groupBy` is not part of the result.
+ * fields fall back to the defaults, and an omitted (`undefined`) config means
+ * all defaults. `groupBy` is not part of the result. Each field is read once.
  *
+ * @throws TypeError when `config` is present but not a plain object (a Map,
+ *   array, Date, class instance or `null` is not read as "use the defaults").
  * @throws RangeError when `minDivergentRate` is not a finite number in
  *   [0, 1], `exampleLimit` is not an integer >= 0, or any other count is not
  *   an integer >= 1.
  */
 export function resolveDivergenceConfig(config: DivergenceConfig = {}): ResolvedDivergenceConfig {
   const d = DEFAULT_DIVERGENCE_CONFIG
-  const minDivergentRate = config.minDivergentRate ?? d.minDivergentRate
+  const given = requirePlainRecord('config', config) as DivergenceConfig
+  const minDivergentRate = given.minDivergentRate ?? d.minDivergentRate
   if (!Number.isFinite(minDivergentRate) || minDivergentRate < 0 || minDivergentRate > 1) {
     throw new RangeError(
-      `advice-ledger-kit: minDivergentRate must be a number between 0 and 1, received ${String(minDivergentRate)}`,
+      `advice-ledger-kit: minDivergentRate must be a number between 0 and 1, received ${describe(minDivergentRate)}`,
     )
   }
   return {
     minComparablePairs: requireCount(
       'minComparablePairs',
-      config.minComparablePairs ?? d.minComparablePairs,
+      given.minComparablePairs ?? d.minComparablePairs,
       1,
     ),
     minDivergentCount: requireCount(
       'minDivergentCount',
-      config.minDivergentCount ?? d.minDivergentCount,
+      given.minDivergentCount ?? d.minDivergentCount,
       1,
     ),
     minDivergentRate,
     minResolvedDivergent: requireCount(
       'minResolvedDivergent',
-      config.minResolvedDivergent ?? d.minResolvedDivergent,
+      given.minResolvedDivergent ?? d.minResolvedDivergent,
       1,
     ),
-    exampleLimit: requireCount('exampleLimit', config.exampleLimit ?? d.exampleLimit, 0),
+    exampleLimit: requireCount('exampleLimit', given.exampleLimit ?? d.exampleLimit, 0),
   }
 }
 
+/** One pair after it has been read once: the fields the counts use, plus the snapshot handed back as an example. */
+interface Entry {
+  readonly pair: JudgmentPair
+  readonly engine: unknown
+  readonly human: unknown
+  readonly outcome: unknown
+}
+
 function calibrationFor(
-  divergent: readonly JudgmentPair[],
+  divergent: readonly Entry[],
   thresholds: ResolvedDivergenceConfig,
 ): CalibrationReading {
-  const resolved = divergent.filter((p) => spoke(p.laterOutcome))
+  const resolved = divergent.filter((e) => spoke(e.outcome))
   // On a divergent pair the two judgments differ by definition, so at most one
   // of these can match. engineRight, humanRight and neitherRight therefore
   // partition `resolved` exactly, which is why no blended accuracy number is
   // even constructible from this shape.
-  const engineRight = resolved.filter((p) => p.laterOutcome === p.engineJudgment).length
-  const humanRight = resolved.filter((p) => p.laterOutcome === p.humanJudgment).length
+  const engineRight = resolved.filter((e) => e.outcome === e.engine).length
+  const humanRight = resolved.filter((e) => e.outcome === e.human).length
   const neitherRight = resolved.length - engineRight - humanRight
 
   const refusalCodes: DivergenceRefusalCode[] = []
@@ -118,15 +130,15 @@ function calibrationFor(
 
 function reportFor(
   group: string | null,
-  pairs: readonly JudgmentPair[],
+  entries: readonly Entry[],
   thresholds: ResolvedDivergenceConfig,
 ): DivergenceReport {
   // The denominator is only the pairs where BOTH judges spoke, because that is
   // the population where disagreement was even possible. Counting pairs with a
   // missing judgment as agreements would understate divergence badly, and most
   // real datasets have far more one-sided rows than two-sided ones.
-  const comparable = pairs.filter((p) => spoke(p.engineJudgment) && spoke(p.humanJudgment))
-  const divergent = comparable.filter((p) => p.engineJudgment !== p.humanJudgment)
+  const comparable = entries.filter((e) => spoke(e.engine) && spoke(e.human))
+  const divergent = comparable.filter((e) => e.engine !== e.human)
   const divergentRate = rate(divergent.length, comparable.length)
 
   const refusalCodes: DivergenceRefusalCode[] = []
@@ -148,7 +160,7 @@ function reportFor(
 
   return {
     group,
-    totalPairs: pairs.length,
+    totalPairs: entries.length,
     comparablePairs: comparable.length,
     agreements: comparable.length - divergent.length,
     divergentCount: divergent.length,
@@ -156,7 +168,7 @@ function reportFor(
     status: refusalCodes.length > 0 ? 'refused' : 'reportable',
     refusalCodes,
     calibration: calibrationFor(divergent, thresholds),
-    examples: divergent.slice(0, thresholds.exampleLimit),
+    examples: divergent.slice(0, thresholds.exampleLimit).map((e) => e.pair),
     interpretation: 'disagreement_is_a_signal_not_a_verdict',
   }
 }
@@ -175,36 +187,61 @@ function reportFor(
  * legitimately have reportable divergence and refused calibration: plenty of
  * disagreements, not enough of them settled yet.
  *
- * Counts do not depend on input order. `examples` keep input order and are
- * your own pair objects, not copies. Pairs are not deduplicated, even when
- * they share an `id`. Inputs are never modified.
+ * Counts do not depend on input order. Every pair is copied once, by index,
+ * before anything is counted, so a getter or a `groupBy` that edits its
+ * argument cannot make the counts disagree with each other. `examples` keep
+ * input order and are those shallow copies (all own enumerable fields), not
+ * your own pair objects. `groupBy` receives the same copy. Pairs are not
+ * deduplicated, even when they share an `id`. Inputs are never modified.
  *
  * @param pairs - every occasion both judges could have spoken on.
  * @param config - floors and the optional `groupBy`. See `resolveDivergenceConfig`.
  * @throws RangeError from `resolveDivergenceConfig`.
- * @throws TypeError when `groupBy` returns something other than a string,
- *   `null` or `undefined`.
+ * @throws TypeError when `pairs` is not an array, has a hole, or holds
+ *   anything but plain objects; when `config` is not a plain object; when
+ *   `groupBy` is present and not a function; or when `groupBy` returns
+ *   something other than a string, `null` or `undefined` (a promise is not
+ *   awaited and is rejected the same way).
  */
 export function computeDivergence(
   pairs: readonly JudgmentPair[],
   config: DivergenceConfig = {},
 ): DivergenceResult {
   const thresholds = resolveDivergenceConfig(config)
-  const groupBy = config.groupBy ?? ((pair: JudgmentPair): string | null => pair.group ?? null)
+  const rawGroupBy = (config).groupBy
+  if (rawGroupBy !== undefined && rawGroupBy !== null && typeof rawGroupBy !== 'function') {
+    typeFail(`groupBy must be a function when present, received ${describe(rawGroupBy)}`)
+  }
+  const groupBy: (pair: JudgmentPair) => unknown =
+    rawGroupBy ?? ((pair: JudgmentPair): unknown => pair.group ?? null)
 
-  const buckets = new Map<string, JudgmentPair[]>()
-  for (const pair of pairs) {
-    const key: unknown = groupBy(pair)
+  const rows = denseCopy('pairs', pairs)
+  const entries: Entry[] = []
+  for (let index = 0; index < rows.length; index++) {
+    const source = rows[index]
+    if (!isPlainRecord(source)) {
+      typeFail(`pairs[${index}] must be a plain object, received ${describe(source)}`)
+    }
+    // One shallow copy reads every field exactly once. The counts use the
+    // values read here, so nothing done to the copy afterwards can change them.
+    const pair = { ...source } as unknown as JudgmentPair
+    const { engineJudgment, humanJudgment, laterOutcome } = pair
+    entries.push({ pair, engine: engineJudgment, human: humanJudgment, outcome: laterOutcome })
+  }
+
+  const buckets = new Map<string, Entry[]>()
+  for (const entry of entries) {
+    const key: unknown = groupBy(entry.pair)
     // undefined is treated like null (a `(p) => p.group` without `?? null`
     // should not create a group literally keyed undefined). Any other
     // non-string would collide with its string form once keys are sorted.
     if (key === null || key === undefined) continue
     if (typeof key !== 'string') {
-      typeFail(`groupBy must return a string or null, received ${shown(key)}`)
+      typeFail(`groupBy must return a string or null, received ${describe(key)}`)
     }
     const bucket = buckets.get(key)
-    if (bucket) bucket.push(pair)
-    else buckets.set(key, [pair])
+    if (bucket) bucket.push(entry)
+    else buckets.set(key, [entry])
   }
 
   const groups = [...buckets.keys()]
@@ -212,7 +249,7 @@ export function computeDivergence(
     .map((key) => reportFor(key, buckets.get(key) ?? [], thresholds))
 
   return {
-    overall: reportFor(null, pairs, thresholds),
+    overall: reportFor(null, entries, thresholds),
     groups,
     thresholds,
   }

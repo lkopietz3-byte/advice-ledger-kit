@@ -32,13 +32,25 @@ import type {
   GradeConfig,
   GradeRefusalCode,
   Observation,
+  DecisionStatus,
   Recommendation,
   RecommendationBasis,
   ResolvedGradeConfig,
   SecondaryReading,
   WindowReading,
 } from './types.js'
-import { difference3, parseInstant, rate, rateHigherThan, requireCount, shown, typeFail } from './internal.js'
+import {
+  denseCopy,
+  describe,
+  difference3,
+  isBlank,
+  parseInstant,
+  rate,
+  rateHigherThan,
+  requireCount,
+  requirePlainRecord,
+  typeFail,
+} from './internal.js'
 
 /**
  * The defaults every unspecified `GradeConfig` field falls back to: 3/3/3
@@ -58,8 +70,15 @@ export const DEFAULT_GRADE_CONFIG: Readonly<ResolvedGradeConfig> = Object.freeze
 const SECONDARY_NOTE =
   'Every post-decision observation, including ones where the recommendation could not have applied. Descriptive only. It cannot create or reverse the headline verdict.'
 
-function readWindow(observations: readonly Observation[]): WindowReading {
-  const bad = observations.filter((o) => o.state === 'bad').length
+/** One matching observation after it has been read once and validated. */
+interface Reading {
+  readonly bad: boolean
+  readonly instant: number
+  readonly exposed: boolean
+}
+
+function readWindow(observations: readonly Reading[]): WindowReading {
+  const bad = observations.filter((o) => o.bad).length
   return {
     observations: observations.length,
     bad,
@@ -102,9 +121,12 @@ function verdictFor(
  * decision) but never lower it: needing less evidence to condemn advice than
  * it took to offer it biases the grade toward "not holding".
  *
- * `null` and `undefined` fields fall back to the defaults. Returns a new
- * object; the input is not modified.
+ * `null` and `undefined` fields fall back to the defaults, and an omitted
+ * (`undefined`) config means all defaults. Returns a new object; the input is
+ * not modified and each of its fields is read once.
  *
+ * @throws TypeError when `config` is present but not a plain object (a Map,
+ *   array, Date, class instance or `null` is not read as "use the defaults").
  * @throws RangeError when `refuteThreshold < proposeThreshold`, when
  *   `minBaselineBadObservations` is not an integer >= 0, or when any other
  *   count is not an integer >= 1 (NaN and Infinity included).
@@ -112,14 +134,15 @@ function verdictFor(
  */
 export function resolveGradeConfig(config: GradeConfig = {}): ResolvedGradeConfig {
   const d = DEFAULT_GRADE_CONFIG
+  const given = requirePlainRecord('config', config) as GradeConfig
   const proposeThreshold = requireCount(
     'proposeThreshold',
-    config.proposeThreshold ?? d.proposeThreshold,
+    given.proposeThreshold ?? d.proposeThreshold,
     1,
   )
   const refuteThreshold = requireCount(
     'refuteThreshold',
-    config.refuteThreshold ?? proposeThreshold,
+    given.refuteThreshold ?? proposeThreshold,
     1,
   )
   if (refuteThreshold < proposeThreshold) {
@@ -129,29 +152,29 @@ export function resolveGradeConfig(config: GradeConfig = {}): ResolvedGradeConfi
         'Raise refuteThreshold to at least proposeThreshold, or lower proposeThreshold to match what the proposal really required.',
     )
   }
-  const requireObservedBasis = config.requireObservedBasis ?? d.requireObservedBasis
+  const requireObservedBasis = given.requireObservedBasis ?? d.requireObservedBasis
   if (typeof requireObservedBasis !== 'boolean') {
-    typeFail(`requireObservedBasis must be a boolean, received ${shown(requireObservedBasis)}`)
+    typeFail(`requireObservedBasis must be a boolean, received ${describe(requireObservedBasis)}`)
   }
   return {
     minBaselineObservations: requireCount(
       'minBaselineObservations',
-      config.minBaselineObservations ?? d.minBaselineObservations,
+      given.minBaselineObservations ?? d.minBaselineObservations,
       1,
     ),
     minResultObservations: requireCount(
       'minResultObservations',
-      config.minResultObservations ?? d.minResultObservations,
+      given.minResultObservations ?? d.minResultObservations,
       1,
     ),
     minExposedResultObservations: requireCount(
       'minExposedResultObservations',
-      config.minExposedResultObservations ?? d.minExposedResultObservations,
+      given.minExposedResultObservations ?? d.minExposedResultObservations,
       1,
     ),
     minBaselineBadObservations: requireCount(
       'minBaselineBadObservations',
-      config.minBaselineBadObservations ?? d.minBaselineBadObservations,
+      given.minBaselineBadObservations ?? d.minBaselineBadObservations,
       0,
     ),
     proposeThreshold,
@@ -164,42 +187,83 @@ const BASES: readonly unknown[] = ['observed', 'model-proposed']
 const STATUSES: readonly unknown[] = ['adopted', 'dismissed']
 const STATES: readonly unknown[] = ['good', 'bad']
 
+/** A string field that must be present and show something. */
+function requireIdentity(name: string, value: unknown): string {
+  if (typeof value !== 'string') typeFail(`${name} must be a string, received ${describe(value)}`)
+  if (isBlank(value)) {
+    typeFail(`${name} must not be blank (empty, whitespace or invisible characters only), received ${describe(value)}`)
+  }
+  return value
+}
+
+interface RecommendationSnapshot {
+  readonly id: string
+  readonly subjectId: string
+  readonly checkKey: unknown
+  readonly basis: RecommendationBasis
+}
+
+interface DecisionSnapshot {
+  readonly recommendationId: string
+  readonly status: DecisionStatus
+  readonly decidedAt: string
+  readonly decidedInstant: number
+}
+
 // TypeScript callers cannot get these wrong, but JavaScript and JSON callers
 // can, and each one used to fail silently: an unknown `state` counted as
 // 'good', a missing date landed in `atBoundaryObservations` or emptied the
 // baseline, and a misspelled `basis` slipped past `requireObservedBasis`.
-function validateLedgerRows(decision: Decision, recommendation: Recommendation): number {
-  if (typeof recommendation.id !== 'string') {
-    typeFail(`recommendation.id must be a string, received ${shown(recommendation.id)}`)
-  }
-  if (typeof recommendation.subjectId !== 'string') {
-    typeFail(`recommendation.subjectId must be a string, received ${shown(recommendation.subjectId)}`)
-  }
-  if (recommendation.basis !== undefined && !BASES.includes(recommendation.basis)) {
+// Every field is read exactly once here; grading uses only these snapshots.
+function readRecommendation(value: unknown): RecommendationSnapshot {
+  const rec = requirePlainRecord('recommendation', value)
+  const { id, subjectId, checkKey, basis } = rec
+  requireIdentity('recommendation.id', id)
+  requireIdentity('recommendation.subjectId', subjectId)
+  if (basis !== undefined && !BASES.includes(basis)) {
     typeFail(
-      `recommendation.basis must be 'observed' or 'model-proposed' when present, received ${shown(recommendation.basis)}`,
+      `recommendation.basis must be 'observed' or 'model-proposed' when present, received ${describe(basis)}`,
     )
   }
-  if (typeof decision.recommendationId !== 'string') {
-    typeFail(`decision.recommendationId must be a string, received ${shown(decision.recommendationId)}`)
+  return {
+    id: id as string,
+    subjectId: subjectId as string,
+    checkKey,
+    basis: (basis ?? 'observed') as RecommendationBasis,
   }
-  if (!STATUSES.includes(decision.status)) {
-    typeFail(`decision.status must be 'adopted' or 'dismissed', received ${shown(decision.status)}`)
-  }
-  if (typeof decision.decidedAt !== 'string' || decision.decidedAt.length === 0) {
-    typeFail(`decision.decidedAt must be a non-empty string, received ${shown(decision.decidedAt)}`)
-  }
-  return parseInstant('decision.decidedAt', decision.decidedAt)
 }
 
-function validateObservation(o: Observation, index: number): number {
-  if (!STATES.includes(o.state)) {
-    typeFail(`observations[${index}].state must be 'good' or 'bad', received ${shown(o.state)}`)
+function readDecision(value: unknown): DecisionSnapshot {
+  const dec = requirePlainRecord('decision', value)
+  const { recommendationId, status, decidedAt } = dec
+  requireIdentity('decision.recommendationId', recommendationId)
+  if (!STATUSES.includes(status)) {
+    typeFail(`decision.status must be 'adopted' or 'dismissed', received ${describe(status)}`)
   }
-  if (typeof o.observedAt !== 'string' || o.observedAt.length === 0) {
-    typeFail(`observations[${index}].observedAt must be a non-empty string, received ${shown(o.observedAt)}`)
+  if (typeof decidedAt !== 'string' || decidedAt.length === 0) {
+    typeFail(`decision.decidedAt must be a non-empty string, received ${describe(decidedAt)}`)
   }
-  return parseInstant(`observations[${index}].observedAt`, o.observedAt)
+  return {
+    recommendationId: recommendationId as string,
+    status: status as DecisionStatus,
+    decidedAt,
+    decidedInstant: parseInstant('decision.decidedAt', decidedAt),
+  }
+}
+
+function readReading(row: Record<string, unknown>, index: number): Reading {
+  const { state, observedAt, exposed } = row
+  if (!STATES.includes(state)) {
+    typeFail(`observations[${index}].state must be 'good' or 'bad', received ${describe(state)}`)
+  }
+  if (typeof observedAt !== 'string' || observedAt.length === 0) {
+    typeFail(`observations[${index}].observedAt must be a non-empty string, received ${describe(observedAt)}`)
+  }
+  return {
+    bad: state === 'bad',
+    instant: parseInstant(`observations[${index}].observedAt`, observedAt),
+    exposed: exposed === true,
+  }
 }
 
 function secondaryFrom(window: WindowReading, wouldBeVerdict: DecisionVerdict): SecondaryReading {
@@ -264,18 +328,19 @@ export function gradeDecision(
   config: GradeConfig = {},
 ): DecisionGrade {
   const thresholds = resolveGradeConfig(config)
-  const decidedInstant = validateLedgerRows(decision, recommendation)
-  const basis: RecommendationBasis = recommendation.basis ?? 'observed'
+  const rec = readRecommendation(recommendation)
+  const dec = readDecision(decision)
+  const basis = rec.basis
 
   const base = {
-    recommendationId: recommendation.id,
-    subjectId: recommendation.subjectId,
+    recommendationId: rec.id,
+    subjectId: rec.subjectId,
     // Keep the result's declared `string` type true for JavaScript callers
     // that omit checkKey; that case is refused with no_gradeable_check_key.
-    checkKey: typeof recommendation.checkKey === 'string' ? recommendation.checkKey : '',
-    status: decision.status,
+    checkKey: typeof rec.checkKey === 'string' ? rec.checkKey : '',
+    status: dec.status,
     basis,
-    decidedAt: decision.decidedAt,
+    decidedAt: dec.decidedAt,
     thresholds,
     method: 'exposure_aligned_before_after_on_matched_check',
     interpretation: 'association_not_causation',
@@ -287,12 +352,11 @@ export function gradeDecision(
   // with the evidence, and reporting "baseline below minimum" on top of that
   // would be a misleading second sentence about a first problem.
   const structural: GradeRefusalCode[] = []
-  if (decision.recommendationId !== recommendation.id) {
+  if (dec.recommendationId !== rec.id) {
     structural.push('decision_recommendation_mismatch')
   }
-  // A missing or non-string checkKey names no check either.
-  const checkKey: unknown = recommendation.checkKey
-  if (typeof checkKey !== 'string' || checkKey.trim().length === 0) {
+  // A missing, non-string or visibly empty checkKey names no check either.
+  if (typeof rec.checkKey !== 'string' || isBlank(rec.checkKey)) {
     structural.push('no_gradeable_check_key')
   }
   if (thresholds.requireObservedBasis && basis === 'model-proposed') {
@@ -311,17 +375,20 @@ export function gradeDecision(
     }
   }
 
-  const instants = new Map<Observation, number>()
-  const relevant: Observation[] = []
-  observations.forEach((o, index) => {
-    if (o.subjectId === recommendation.subjectId && o.checkKey === recommendation.checkKey) {
-      instants.set(o, validateObservation(o, index))
-      relevant.push(o)
+  // One indexed pass over a dense copy. Each row is read once; only matching
+  // rows are validated, and everything below computes from these snapshots.
+  const rows = denseCopy('observations', observations)
+  const relevant: Reading[] = []
+  for (let index = 0; index < rows.length; index++) {
+    const row = requirePlainRecord(`observations[${index}]`, rows[index])
+    const { subjectId, checkKey } = row
+    if (subjectId === rec.subjectId && checkKey === rec.checkKey) {
+      relevant.push(readReading(row, index))
     }
-  })
+  }
   // Compared as instants, so '...00Z', '...00.000Z' and '...+00:00' agree.
-  const before = relevant.filter((o) => (instants.get(o) as number) < decidedInstant)
-  const after = relevant.filter((o) => (instants.get(o) as number) > decidedInstant)
+  const before = relevant.filter((o) => o.instant < dec.decidedInstant)
+  const after = relevant.filter((o) => o.instant > dec.decidedInstant)
   // An observation stamped exactly at the decision is ambiguous: part of that
   // moment is before the advice was in force and part is after. It is counted
   // and reported, and it grades nothing.
@@ -331,7 +398,7 @@ export function gradeDecision(
   // exposure question is not a confirmed exposure. Baseline observations are
   // NOT filtered this way, because before the decision there was no advice for
   // anything to be exposed to.
-  const exposedAfter = after.filter((o) => o.exposed === true)
+  const exposedAfter = after.filter((o) => o.exposed)
 
   const baseline = readWindow(before)
   const result = readWindow(exposedAfter)
