@@ -161,14 +161,18 @@ describe('describeGrade sentences', () => {
   it('names the verdict, both windows, and the decision', () => {
     const notHolding = gradeDecision({ ...dec, status: 'dismissed' }, rec, [...before(2, 2), ...after(2, 1, 1)])
     expect(describeGrade(notHolding)).toBe(
-      'Not holding: c on s was bad in 2 of 4 observations before and 2 of 3 exposed observations since the recommendation was dismissed on 2026-02-01.',
+      'Not holding: c on s was bad in 2 of 4 observations before and 2 of 3 exposed observations since the recommendation was dismissed on 2026-02-01. ' +
+        'The exposed bad count (2) reached the refute threshold (2). ' +
+        'This is an association between two windows, not evidence that the recommendation caused the change.',
     )
   })
 
-  it('lists refusal codes verbatim', () => {
-    expect(describeGrade(gradeDecision(dec, rec, []))).toBe(
-      'Refused to grade c on s: baseline_below_minimum, baseline_lacks_negative_signal, result_below_minimum, exposed_result_below_minimum.',
-    )
+  it('lists refusal codes verbatim, after the evidence', () => {
+    const text = describeGrade(gradeDecision(dec, rec, []))
+    expect(text.startsWith('Not enough evidence to grade c on s. Before the decision: 0 observations, 3 required (not met).')).toBe(true)
+    expect(text.endsWith(
+      'Codes: baseline_below_minimum, baseline_lacks_negative_signal, result_below_minimum, exposed_result_below_minimum.',
+    )).toBe(true)
   })
 })
 
@@ -256,21 +260,28 @@ describe('describeDivergence sentences', () => {
   it('reports divergence and both hit counts separately', () => {
     const { overall } = computeDivergence([...agree(20), ...differ(3, 'a'), ...differ(2, 'b')])
     expect(describeDivergence(overall)).toBe(
-      'Overall: the human disagreed on 5 of 25 comparable pairs. Of the 5 with a later outcome, the engine was right 3 and the human was right 2.',
+      'Overall: the human disagreed on 5 of 25 comparable pairs. ' +
+        'Of the 5 with a later outcome, the engine was right 3, the human was right 2 and neither was right 0. ' +
+        'No disagreement is still unresolved. ' +
+        'These counts compare supplied judgments with supplied outcomes; they do not show causal benefit or general accuracy.',
     )
   })
 
   it('says why calibration is withheld', () => {
     const { overall } = computeDivergence([...agree(20), ...differ(2, 'a'), ...differ(3)])
     expect(describeDivergence(overall)).toBe(
-      'Overall: the human disagreed on 5 of 25 comparable pairs. Who was right is not reported yet (resolved_divergent_below_minimum); 2 disagreements have an outcome.',
+      'Overall: the human disagreed on 5 of 25 comparable pairs. ' +
+        'Who was right is not reported yet (resolved_divergent_below_minimum): 2 of 5 disagreements have a later outcome. ' +
+        'These counts compare supplied judgments with supplied outcomes; they do not show causal benefit or general accuracy.',
     )
   })
 
   it('names a refused group', () => {
     const { groups } = computeDivergence(differ(2).map((p) => ({ ...p, group: 'text' })))
     expect(describeDivergence(groups[0] as (typeof groups)[number])).toBe(
-      'Group text: refused to report divergence (comparable_pairs_below_minimum, divergent_count_below_minimum); 2 of 2 comparable pairs diverged.',
+      'Group text: refused to report divergence (comparable_pairs_below_minimum, divergent_count_below_minimum); 2 of 2 comparable pairs diverged. ' +
+        'Short on: comparable pairs (2), disagreements (2). ' +
+        'No conclusion about the engine or the human is available from these pairs.',
     )
   })
 })

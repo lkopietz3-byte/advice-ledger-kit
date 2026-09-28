@@ -177,3 +177,21 @@ export function parseInstant(name: string, value: string): number {
   }
   return Date.parse(match[4] === undefined ? `${value}T00:00:00Z` : value)
 }
+
+/**
+ * A caller-supplied value as sentence text: strings are escaped (see
+ * `escapeText`), everything else is described without calling into it.
+ */
+export function text(value: unknown): string {
+  return typeof value === 'string' ? escapeText(value) : describe(value)
+}
+
+/** Like `text`, but a string that shows nothing reads `(blank)` instead of vanishing. */
+export function label(value: unknown): string {
+  return typeof value === 'string' && isBlank(value) ? '(blank)' : text(value)
+}
+
+/** `1 observation`, `3 observations`. */
+export function plural(count: unknown, noun: string): string {
+  return `${text(count)} ${noun}${count === 1 ? '' : 's'}`
+}

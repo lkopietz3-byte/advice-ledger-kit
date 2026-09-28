@@ -177,7 +177,7 @@ describe('computeDivergence — who was right, reported separately', () => {
     expect(c.note).toBe('engine_and_human_accuracy_reported_separately_never_merged')
     // There is no blended accuracy field to read, by construction.
     expect(Object.keys(c)).not.toContain('accuracy')
-    expect(describeDivergence(overall)).toContain('the engine was right 3 and the human was right 2')
+    expect(describeDivergence(overall)).toContain('the engine was right 3, the human was right 2 and neither was right 0')
   })
 
   it('partitions resolved disagreements exactly, so no single accuracy is constructible', () => {

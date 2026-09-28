@@ -29,7 +29,17 @@ import type {
   JudgmentPair,
   ResolvedDivergenceConfig,
 } from './types.js'
-import { denseCopy, describe, isPlainRecord, rate, requireCount, requirePlainRecord, typeFail } from './internal.js'
+import {
+  denseCopy,
+  describe,
+  isPlainRecord,
+  label,
+  rate,
+  requireCount,
+  requirePlainRecord,
+  text,
+  typeFail,
+} from './internal.js'
 
 /**
  * The defaults every unspecified `DivergenceConfig` floor falls back to: 10
@@ -255,23 +265,82 @@ export function computeDivergence(
   }
 }
 
-/**
- * Render a divergence report as one plain sentence.
- *
- * A refused report says "refused to report divergence (<codes>)" and gives
- * the raw counts. A reportable report gives the disagreement count, then
- * either why calibration is withheld or the engine-right and human-right
- * counts as two separate numbers. Never prints a blended accuracy.
- */
-export function describeDivergence(report: DivergenceReport): string {
-  const where = report.group === null ? 'Overall' : `Group ${report.group}`
-  if (report.status === 'refused') {
-    return `${where}: refused to report divergence (${report.refusalCodes.join(', ')}); ${report.divergentCount} of ${report.comparablePairs} comparable pairs diverged.`
+const DIVERGENCE_LIMIT =
+  'These counts compare supplied judgments with supplied outcomes; they do not show causal benefit or general accuracy.'
+
+/** What one refused report is short on, as `name (actual[, required])`. */
+function shortfalls(
+  report: DivergenceReport,
+  thresholds: Readonly<ResolvedDivergenceConfig> | undefined,
+): string {
+  const need = (value: unknown): string => (thresholds === undefined ? '' : `, ${text(value)} required`)
+  const items: string[] = []
+  const comparable = report.comparablePairs
+  for (const code of report.refusalCodes) {
+    if (code === 'comparable_pairs_below_minimum') {
+      items.push(`comparable pairs (${text(comparable)}${need(thresholds?.minComparablePairs)})`)
+    } else if (code === 'divergent_count_below_minimum') {
+      items.push(`disagreements (${text(report.divergentCount)}${need(thresholds?.minDivergentCount)})`)
+    } else if (code === 'divergent_rate_below_minimum') {
+      const actual = comparable === 0 ? 'no comparable pairs' : `${text(report.divergentCount)} of ${text(comparable)}`
+      // The floor is checked on the exact ratio, so the rounded display can
+      // sit at or above it while the report is still refused.
+      const rounded =
+        thresholds !== undefined && report.divergentRate !== null && report.divergentRate >= thresholds.minDivergentRate
+          ? `; it displays as ${text(report.divergentRate)} but the exact ratio is lower`
+          : ''
+      items.push(`disagreement rate (${actual}${need(thresholds?.minDivergentRate)}${rounded})`)
+    }
   }
-  const head = `${where}: the human disagreed on ${report.divergentCount} of ${report.comparablePairs} comparable pairs.`
+  return items.length === 0 ? '' : ` Short on: ${items.join(', ')}.`
+}
+
+/**
+ * Render a divergence report as plain text on one line.
+ *
+ * - A refused report says "refused to report divergence (<codes>)" and gives
+ *   the raw counts, then what it is short on. Pass the result's `thresholds`
+ *   as the second argument to add the required numbers (and to explain a rate
+ *   that displays at the floor but is refused on the exact ratio). It reaches
+ *   no conclusion about the engine or the human.
+ * - A reportable report gives the disagreement count, then either why
+ *   calibration is withheld (with how many disagreements have an outcome) or
+ *   the engine-right, human-right and neither-right counts as three separate
+ *   numbers that add up to the resolved disagreements, and how many
+ *   disagreements are still unresolved. Never prints a blended accuracy, and
+ *   never prints the three counts when calibration is refused.
+ * - It ends with a note that the counts compare supplied labels with supplied
+ *   outcomes and do not show causal benefit or general accuracy.
+ *
+ * Caller strings (the group name, codes) are escaped, so control, newline and
+ * bidi characters cannot forge structure. The wording changed in 0.2.0.
+ *
+ * @param report - one report from `computeDivergence` (overall or a group).
+ * @param thresholds - optional: the `thresholds` from the same result, to show required counts.
+ */
+export function describeDivergence(
+  report: DivergenceReport,
+  thresholds?: Readonly<ResolvedDivergenceConfig>,
+): string {
+  const where = report.group === null ? 'Overall' : `Group ${label(report.group)}`
+  const codes = (list: readonly string[]): string => list.map((c) => text(c)).join(', ')
+  const compared = `${text(report.divergentCount)} of ${text(report.comparablePairs)} comparable pairs`
+  if (report.status === 'refused') {
+    return (
+      `${where}: refused to report divergence (${codes(report.refusalCodes)}); ${compared} diverged.` +
+      `${shortfalls(report, thresholds)} No conclusion about the engine or the human is available from these pairs.`
+    )
+  }
+  const head = `${where}: the human disagreed on ${compared}.`
   const c = report.calibration
   if (c.status === 'refused') {
-    return `${head} Who was right is not reported yet (${c.refusalCodes.join(', ')}); ${c.resolvedDivergent} disagreements have an outcome.`
+    const required = thresholds === undefined ? '' : ` (${text(thresholds.minResolvedDivergent)} required)`
+    return `${head} Who was right is not reported yet (${codes(c.refusalCodes)}): ${text(c.resolvedDivergent)} of ${text(report.divergentCount)} disagreements have a later outcome${required}. ${DIVERGENCE_LIMIT}`
   }
-  return `${head} Of the ${c.resolvedDivergent} with a later outcome, the engine was right ${c.engineRight} and the human was right ${c.humanRight}.`
+  const unresolved = Math.max(0, report.divergentCount - c.resolvedDivergent)
+  const open =
+    unresolved === 0
+      ? 'No disagreement is still unresolved.'
+      : `${text(unresolved)} more ${unresolved === 1 ? 'has' : 'have'} no later outcome yet.`
+  return `${head} Of the ${text(c.resolvedDivergent)} with a later outcome, the engine was right ${text(c.engineRight)}, the human was right ${text(c.humanRight)} and neither was right ${text(c.neitherRight)}. ${open} ${DIVERGENCE_LIMIT}`
 }

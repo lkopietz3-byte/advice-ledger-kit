@@ -79,7 +79,9 @@ describe('gradeDecision — verdicts with real before/after rates', () => {
     expect(grade.badRateDelta).toBe(-0.667)
     expect(grade.interpretation).toBe('association_not_causation')
     expect(describeGrade(grade)).toBe(
-      'Holding: seal-leak on pump-14 was bad in 4 of 6 observations before and 0 of 5 exposed observations since the recommendation was adopted on 2026-02-01.',
+      'Holding: seal-leak on pump-14 was bad in 4 of 6 observations before and 0 of 5 exposed observations since the recommendation was adopted on 2026-02-01. ' +
+        "The exposed bad count (0) is below the refute threshold (2) and its rate is not higher than the baseline's. " +
+        'This is an association between two windows, not evidence that the recommendation caused the change.',
     )
   })
 
@@ -229,7 +231,7 @@ describe('gradeDecision — floors return refusal codes, never a verdict', () =>
       'result_below_minimum',
       'exposed_result_below_minimum',
     ])
-    expect(describeGrade(grade)).toContain('Refused to grade')
+    expect(describeGrade(grade)).toContain('Not enough evidence to grade')
   })
 
   it('refuses structurally when the decision does not match the recommendation', () => {

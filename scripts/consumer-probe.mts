@@ -66,6 +66,7 @@ const rate: number | null = report.divergentRate;
 const group: string | null = report.group;
 const resolvedDivergence: ResolvedDivergenceConfig = resolveDivergenceConfig(divergenceConfig);
 const divergenceSentence: string = describeDivergence(report);
+const divergenceWithFloors: string = describeDivergence(report, result.thresholds);
 
 // @ts-expect-error refuteThreshold is a number, not a string
 const badConfig: GradeConfig = { refuteThreshold: '2' };
@@ -76,5 +77,5 @@ DEFAULT_GRADE_CONFIG.refuteThreshold = 1;
 
 export const probe = [
   verdict, codes, window, wouldBe, delta, resolved, defaults, sentence, label(verdict),
-  divergenceCodes, rate, group, resolvedDivergence, divergenceSentence, badConfig, blended,
+  divergenceCodes, rate, group, resolvedDivergence, divergenceSentence, divergenceWithFloors, badConfig, blended,
 ];

@@ -44,11 +44,14 @@ import {
   describe,
   difference3,
   isBlank,
+  label,
   parseInstant,
+  plural,
   rate,
   rateHigherThan,
   requireCount,
   requirePlainRecord,
+  text,
   typeFail,
 } from './internal.js'
 
@@ -465,25 +468,128 @@ export function gradeDecision(
   }
 }
 
+const CAUSE_LIMIT =
+  'This is an association between two windows, not evidence that the recommendation caused the change.'
+
+const STRUCTURAL_REASONS: Partial<Record<GradeRefusalCode, string>> = {
+  decision_recommendation_mismatch:
+    'The decision refers to a different recommendation than the one supplied.',
+  no_gradeable_check_key:
+    'The recommendation names no check (its checkKey is missing or blank), so no observation can be matched to it.',
+  basis_not_gradeable:
+    'The recommendation is model-proposed and this configuration grades observed recommendations only.',
+}
+
+/** `<prefix>: <count> [noun], <required> required (met|not met).` */
+function floorLine(prefix: string, count: unknown, required: unknown, noun?: string): string {
+  const met = typeof count === 'number' && typeof required === 'number' && count >= required
+  const shown = noun === undefined ? text(count) : plural(count, noun)
+  return `${prefix}: ${shown}, ${text(required)} required (${met ? 'met' : 'not met'}).`
+}
+
+function describeRefusal(grade: DecisionGrade, where: string): string {
+  const codes: readonly GradeRefusalCode[] = grade.refusalCodes
+  const codeList = `Codes: ${codes.map((c) => text(c)).join(', ')}.`
+  const noConclusion = 'No conclusion about the decision is available from this record.'
+  const structural = codes.filter((c) => STRUCTURAL_REASONS[c] !== undefined)
+  if (structural.length > 0) {
+    // Structural refusals never read an observation, so the zero windows in
+    // the result are placeholders. Say so instead of printing them as counts.
+    const reasons = structural.map((c) => STRUCTURAL_REASONS[c]).join(' ')
+    return (
+      `Cannot grade ${where}: the supplied record cannot be graded, so no observations were measured. ` +
+      `${reasons} Next: correct the flagged input and grade again. ${noConclusion} ${codeList}`
+    )
+  }
+
+  const t = grade.thresholds
+  const lacksSignal = codes.includes('baseline_lacks_negative_signal')
+  const exposedShort = codes.includes('exposed_result_below_minimum')
+  const countShort =
+    codes.includes('baseline_below_minimum') ||
+    codes.includes('result_below_minimum') ||
+    exposedShort
+  const parts = [
+    `Not enough evidence to grade ${where}.`,
+    floorLine('Before the decision', grade.baseline.observations, t.minBaselineObservations, 'observation'),
+  ]
+  if (lacksSignal) {
+    parts.push(floorLine('Bad observations before the decision', grade.baseline.bad, t.minBaselineBadObservations))
+  }
+  // `secondary` counts every post-decision observation; `result` counts only
+  // the confirmed-exposed ones. They are different windows with different floors.
+  parts.push(
+    floorLine('After the decision', grade.secondary.observations, t.minResultObservations, 'observation'),
+    floorLine('Confirmed exposed after the decision', grade.result.observations, t.minExposedResultObservations, 'observation'),
+  )
+  if (exposedShort) {
+    parts.push('Only observations marked exposed: true count toward the headline result; unmarked ones are not assumed exposed.')
+  }
+  if (lacksSignal) {
+    parts.push(
+      'With no bad observation before the decision, a quiet period afterward says nothing about the recommendation.',
+    )
+  }
+  const countAction =
+    'check the supplied record and exposure flags, and include more valid observations if they exist; do not infer missing exposure.'
+  const signalAction =
+    'check that the record covers the time before the decision; do not add observations that did not happen.'
+  if (countShort && lacksSignal) parts.push(`Next: ${countAction} Also ${signalAction}`)
+  else if (countShort) parts.push(`Next: ${countAction}`)
+  else if (lacksSignal) parts.push(`Next: ${signalAction}`)
+  parts.push(noConclusion, codeList)
+  return parts.join(' ')
+}
+
 /**
- * Render a grade as one plain sentence.
+ * Render a grade as plain text on one line: result, then evidence, then the
+ * reason, the next step and the limits. The JSON stays the source of truth;
+ * this is what to show a reader who will not open it.
  *
- * A verdict reads "Holding: <check> on <subject> was bad in B of N
- * observations before and b of n exposed observations since the
- * recommendation was <status> on <decidedAt>." A refusal reads "Refused to
- * grade <check> on <subject>: <codes>." with the codes verbatim. Makes no
- * causal claim.
+ * - A verdict reads "Holding: <check> on <subject> was bad in B of N
+ *   observations before and b of n exposed observations since the
+ *   recommendation was <status> on <decidedAt>." It then says which rule
+ *   decided (the count reaching `refuteThreshold`, or the exact rate being
+ *   higher than the baseline's, with a note when both rates display the
+ *   same) and that the reading is an association, not proof the
+ *   recommendation caused anything.
+ * - A refusal for missing evidence reads "Not enough evidence to grade ...",
+ *   then each floor with its actual and required count (before, after, and
+ *   confirmed exposed after, plus bad-before when that floor failed), why it
+ *   matters, what to check, and the codes. It never suggests lowering a floor
+ *   or adding observations that did not happen.
+ * - A structural refusal reads "Cannot grade ..." and explains the invalid
+ *   input; the zero windows are placeholders and are not printed as counts.
+ *
+ * Caller strings (check, subject, dates, codes) are escaped, so control,
+ * newline and bidi characters cannot forge structure or reorder the text. The
+ * wording is deterministic. It changed in 0.2.0; anything that matched the old
+ * sentences needs to match the new ones or read the JSON instead.
  */
 export function describeGrade(grade: DecisionGrade): string {
-  const where = `${grade.checkKey} on ${grade.subjectId}`
-  if (grade.verdict === 'refused') {
-    return `Refused to grade ${where}: ${grade.refusalCodes.join(', ')}.`
-  }
-  const b = grade.baseline
-  const r = grade.result
+  const { checkKey, subjectId, verdict, status, decidedAt, baseline: b, result: r, thresholds } = grade
+  const where = `${label(checkKey)} on ${label(subjectId)}`
+  if (verdict === 'refused') return describeRefusal(grade, where)
+
   // "exposed" matters: `result` counts only exposed post-decision
   // observations, and calling that "since" would hide the unexposed ones.
-  const window = `bad in ${b.bad} of ${b.observations} observations before and ${r.bad} of ${r.observations} exposed observations since`
-  const label = grade.verdict === 'holding' ? 'Holding' : 'Not holding'
-  return `${label}: ${where} was ${window} the recommendation was ${grade.status} on ${grade.decidedAt}.`
+  const window = `bad in ${text(b.bad)} of ${text(b.observations)} observations before and ${text(r.bad)} of ${text(r.observations)} exposed observations since`
+  const head = `${verdict === 'holding' ? 'Holding' : 'Not holding'}: ${where} was ${window} the recommendation was ${text(status)} on ${text(decidedAt)}.`
+  const count = `The exposed bad count (${text(r.bad)})`
+  const refute = `the refute threshold (${text(thresholds.refuteThreshold)})`
+  let reason: string
+  if (verdict === 'holding') {
+    reason = `${count} is below ${refute} and its rate is not higher than the baseline's.`
+  } else if (r.bad >= thresholds.refuteThreshold) {
+    reason = `${count} reached ${refute}.`
+  } else {
+    // Only the exact rate rule can be responsible here. Two rates can round to
+    // the same 3-place display while the counts still differ.
+    reason =
+      `${count} is below ${refute}, but the exposed bad rate (${text(r.bad)} of ${text(r.observations)}) is higher than the baseline's (${text(b.bad)} of ${text(b.observations)}), compared as exact counts.` +
+      (r.badRate !== null && r.badRate === b.badRate
+        ? ` Both display as ${text(r.badRate)}; the exact counts decide, not the rounded display.`
+        : '')
+  }
+  return `${head} ${reason} ${CAUSE_LIMIT}`
 }
