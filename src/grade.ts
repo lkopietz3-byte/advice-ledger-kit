@@ -38,7 +38,7 @@ import type {
   SecondaryReading,
   WindowReading,
 } from './types.js'
-import { difference3, rate, rateHigherThan, requireCount, shown, typeFail } from './internal.js'
+import { difference3, parseInstant, rate, rateHigherThan, requireCount, shown, typeFail } from './internal.js'
 
 /**
  * The defaults every unspecified `GradeConfig` field falls back to: 3/3/3
@@ -168,7 +168,7 @@ const STATES: readonly unknown[] = ['good', 'bad']
 // can, and each one used to fail silently: an unknown `state` counted as
 // 'good', a missing date landed in `atBoundaryObservations` or emptied the
 // baseline, and a misspelled `basis` slipped past `requireObservedBasis`.
-function validateLedgerRows(decision: Decision, recommendation: Recommendation): void {
+function validateLedgerRows(decision: Decision, recommendation: Recommendation): number {
   if (typeof recommendation.id !== 'string') {
     typeFail(`recommendation.id must be a string, received ${shown(recommendation.id)}`)
   }
@@ -189,15 +189,17 @@ function validateLedgerRows(decision: Decision, recommendation: Recommendation):
   if (typeof decision.decidedAt !== 'string' || decision.decidedAt.length === 0) {
     typeFail(`decision.decidedAt must be a non-empty string, received ${shown(decision.decidedAt)}`)
   }
+  return parseInstant('decision.decidedAt', decision.decidedAt)
 }
 
-function validateObservation(o: Observation, index: number): void {
+function validateObservation(o: Observation, index: number): number {
   if (!STATES.includes(o.state)) {
     typeFail(`observations[${index}].state must be 'good' or 'bad', received ${shown(o.state)}`)
   }
   if (typeof o.observedAt !== 'string' || o.observedAt.length === 0) {
     typeFail(`observations[${index}].observedAt must be a non-empty string, received ${shown(o.observedAt)}`)
   }
+  return parseInstant(`observations[${index}].observedAt`, o.observedAt)
 }
 
 function secondaryFrom(window: WindowReading, wouldBeVerdict: DecisionVerdict): SecondaryReading {
@@ -242,6 +244,12 @@ function secondaryFrom(window: WindowReading, wouldBeVerdict: DecisionVerdict): 
  *   the whole log is fine. Only matching observations are read and validated.
  * @param config - floors and thresholds. See `resolveGradeConfig`.
  * @throws RangeError or TypeError from `resolveGradeConfig`.
+ * @throws RangeError when `decision.decidedAt`, or `observedAt` on a matching
+ *   observation, is a non-empty string that is not a date ('YYYY-MM-DD', read
+ *   as UTC midnight) or a timestamp with seconds and an explicit zone (`Z` or
+ *   `+hh:mm`), or names a day that does not exist. Windows compare parsed
+ *   instants, so `...T00:00:00Z`, `...T00:00:00.000Z` and `...T01:00:00+01:00`
+ *   are the same moment.
  * @throws TypeError when `recommendation.id`, `recommendation.subjectId` or
  *   `decision.recommendationId` is not a string, `recommendation.basis` is
  *   present and not 'observed' or 'model-proposed', `decision.status` is not
@@ -256,7 +264,7 @@ export function gradeDecision(
   config: GradeConfig = {},
 ): DecisionGrade {
   const thresholds = resolveGradeConfig(config)
-  validateLedgerRows(decision, recommendation)
+  const decidedInstant = validateLedgerRows(decision, recommendation)
   const basis: RecommendationBasis = recommendation.basis ?? 'observed'
 
   const base = {
@@ -303,15 +311,17 @@ export function gradeDecision(
     }
   }
 
+  const instants = new Map<Observation, number>()
   const relevant: Observation[] = []
   observations.forEach((o, index) => {
     if (o.subjectId === recommendation.subjectId && o.checkKey === recommendation.checkKey) {
-      validateObservation(o, index)
+      instants.set(o, validateObservation(o, index))
       relevant.push(o)
     }
   })
-  const before = relevant.filter((o) => o.observedAt < decision.decidedAt)
-  const after = relevant.filter((o) => o.observedAt > decision.decidedAt)
+  // Compared as instants, so '...00Z', '...00.000Z' and '...+00:00' agree.
+  const before = relevant.filter((o) => (instants.get(o) as number) < decidedInstant)
+  const after = relevant.filter((o) => (instants.get(o) as number) > decidedInstant)
   // An observation stamped exactly at the decision is ambiguous: part of that
   // moment is before the advice was in force and part is after. It is counted
   // and reported, and it grades nothing.

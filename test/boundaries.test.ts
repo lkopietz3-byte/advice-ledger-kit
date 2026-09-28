@@ -14,6 +14,10 @@ import type { Decision, GradeConfig, JudgmentPair, Observation, Recommendation }
 const rec: Recommendation = { id: 'r', subjectId: 's', checkKey: 'c', proposedAt: '2026-01-01' }
 const dec: Decision = { recommendationId: 'r', status: 'adopted', decidedAt: '2026-02-01' }
 
+/** The calendar day `offset` days from the 2026-02-01 decision (always a real date). */
+const isoDay = (offset: number): string =>
+  new Date(Date.UTC(2026, 1, 1) + offset * 86_400_000).toISOString().slice(0, 10)
+
 /** `bad` bad and `good` good observations before the decision. */
 function before(bad: number, good: number): Observation[] {
   return [...Array<string>(bad).fill('bad'), ...Array<string>(good).fill('good')].map(
@@ -21,7 +25,7 @@ function before(bad: number, good: number): Observation[] {
       subjectId: 's',
       checkKey: 'c',
       state: state as 'good' | 'bad',
-      observedAt: `2026-01-${String(i + 1).padStart(2, '0')}`,
+      observedAt: isoDay(-(i + 1)),
     }),
   )
 }
@@ -29,7 +33,7 @@ function before(bad: number, good: number): Observation[] {
 /** Post-decision observations: `bad` bad exposed, `good` good exposed, `unexposed` good unexposed. */
 function after(bad: number, good: number, unexposed = 0): Observation[] {
   const rows: Observation[] = []
-  const day = (i: number) => `2026-02-${String(i + 2).padStart(2, '0')}`
+  const day = (i: number) => isoDay(i + 1)
   for (let i = 0; i < bad; i++) rows.push({ subjectId: 's', checkKey: 'c', state: 'bad', observedAt: day(rows.length), exposed: true })
   for (let i = 0; i < good; i++) rows.push({ subjectId: 's', checkKey: 'c', state: 'good', observedAt: day(rows.length), exposed: true })
   for (let i = 0; i < unexposed; i++) rows.push({ subjectId: 's', checkKey: 'c', state: 'good', observedAt: day(rows.length), exposed: false })

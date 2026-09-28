@@ -23,10 +23,15 @@
 // headline reading, it enforces floors on each window separately, and below
 // any floor it returns machine-readable refusal codes instead of a verdict.
 //
-// Dates are compared as strings, so use one consistent ISO-8601 format and one
-// UTC offset for every `decidedAt` and `observedAt` in a given ledger. Mixing
-// 'YYYY-MM-DD' with 'YYYY-MM-DDTHH:mm:ssZ' compares wrongly, because
-// '2026-01-01' sorts before '2026-01-01T00:00:00Z'.
+// Dates are compared as instants, not text. Every `decidedAt` and `observedAt`
+// must be a calendar date ('YYYY-MM-DD', read as UTC midnight) or a timestamp
+// with seconds and an explicit zone ('2026-02-01T09:30:00Z',
+// '2026-02-01T10:30:00+01:00', at most three fractional digits). Anything
+// else, including a day that does not exist, throws a RangeError rather than
+// being graded. Two strings that name the same instant are the same instant:
+// '2026-02-01T00:00:00Z', '2026-02-01T00:00:00.000Z' and
+// '2026-02-01T01:00:00+01:00' all sit on the boundary of a decision made at
+// '2026-02-01'.
 
 // ---------------------------------------------------------------------------
 // Ledger inputs
@@ -73,8 +78,10 @@ export interface Decision {
   status: DecisionStatus
   /**
    * When the call was made. Observations strictly before it form the
-   * baseline, strictly after it the result; equal ones grade neither window.
-   * Must be a non-empty string.
+   * baseline, strictly after it the result; observations at the same instant
+   * grade neither window, whatever their string form. Must be a date
+   * ('YYYY-MM-DD', UTC midnight) or a timestamp with seconds and an explicit
+   * zone (`Z` or `+hh:mm`), or `gradeDecision` throws.
    */
   decidedAt: string
 }
@@ -95,7 +102,10 @@ export interface Observation {
   checkKey: string
   /** Anything other than 'good' or 'bad' on a matching observation throws a TypeError. */
   state: ObservationState
-  /** Compared to `decidedAt` as a string. Must be non-empty on a matching observation. */
+  /**
+   * Compared to `decidedAt` as an instant. Same format rules as `decidedAt`,
+   * checked on a matching observation; anything else throws a `RangeError`.
+   */
   observedAt: string
   /**
    * Whether the recommendation could actually have applied on this occasion.
