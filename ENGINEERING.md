@@ -75,6 +75,9 @@ not, even after an unpublish. Treat unpublish as unavailable: prefer fixing forw
 patch version, and use `npm deprecate <name>@"<range>" "<message>"` to warn consumers off a
 bad release while it stays installable for anyone already pinned to it.
 
+A change to a refusal code, verdict rule, or sentence format affects `honesty-mcp`
+(`grade_decision`, `compute_divergence`); note it in the changelog.
+
 ### Runtime support policy
 
 - **Supported (recommended for production):** Node 22 and 24 LTS; Node 26 current.
