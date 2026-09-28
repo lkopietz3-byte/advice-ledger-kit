@@ -391,3 +391,103 @@ describe('bug class 8: caller strings are escaped in text output', () => {
     expect(groups[0]?.group).toBe('g\nh')
   })
 })
+
+describe('text edge cases', () => {
+  const thin = (extra: Parameters<typeof gradeDecision>[3] = {}, rows: Observation[] = []) =>
+    describeGrade(gradeDecision(adopted, recommendation, rows, extra))
+
+  it('asks for more observations when only the baseline count is short', () => {
+    const text = thin({}, [
+      row('2026-01-10', 'bad'), row('2026-01-11', 'good'),
+      row('2026-02-10', 'good', true), row('2026-02-11', 'good', true), row('2026-02-12', 'good', true),
+    ])
+    expect(text).toContain('Before the decision: 2 observations, 3 required (not met).')
+    expect(text).toContain(`Next: ${COUNT_ACTION} ${NO_CONCLUSION}`)
+    expect(text).not.toContain('Also check')
+    expect(text).not.toContain('marked exposed')
+    expect(text.endsWith('Codes: baseline_below_minimum.')).toBe(true)
+  })
+
+  it('asks for more observations when only the all-after count is short', () => {
+    const text = thin({ minExposedResultObservations: 1 }, [
+      row('2026-01-10', 'bad'), row('2026-01-11', 'bad'), row('2026-01-12', 'good'),
+      row('2026-02-10', 'good', true), row('2026-02-11', 'good', true),
+    ])
+    expect(text).toContain('After the decision: 2 observations, 3 required (not met).')
+    expect(text).toContain('Confirmed exposed after the decision: 2 observations, 1 required (met).')
+    expect(text).toContain(`Next: ${COUNT_ACTION} ${NO_CONCLUSION}`)
+    expect(text).not.toContain('marked exposed')
+    expect(text.endsWith('Codes: result_below_minimum.')).toBe(true)
+  })
+
+  it('marks a count that equals its floor as met', () => {
+    const text = thin({ minBaselineObservations: 1 }, [row('2026-01-10', 'bad')])
+    expect(text).toContain('Before the decision: 1 observation, 1 required (met).')
+  })
+
+  it('gives only the signal action when the counts are fine', () => {
+    const text = thin({}, [
+      row('2026-01-10', 'good'), row('2026-01-11', 'good'), row('2026-01-12', 'good'),
+      row('2026-02-10', 'good', true), row('2026-02-11', 'good', true), row('2026-02-12', 'good', true),
+    ])
+    expect(text).toContain('Next: check that the record covers the time before the decision;')
+    expect(text).not.toContain('Also check')
+    expect(text).not.toContain('include more valid observations')
+  })
+
+  it('offers no next step for a refusal with codes it does not recognize', () => {
+    const grade = gradeDecision(adopted, recommendation, [])
+    const text = describeGrade({ ...grade, refusalCodes: [] })
+    expect(text).not.toContain('Next:')
+    expect(text).toContain(`${NO_CONCLUSION} Codes: .`)
+  })
+
+  it('does not claim two null rates display the same', () => {
+    const grade = gradeDecision(adopted, recommendation, [])
+    const window = { observations: 0, bad: 0, good: 0, badRate: null }
+    const text = describeGrade({
+      ...grade,
+      verdict: 'not-holding',
+      refusalCodes: [],
+      baseline: window,
+      result: window,
+    })
+    expect(text).toContain('but the exposed bad rate (0 of 0)')
+    expect(text).not.toContain('Both display')
+  })
+
+  it('describes a check or subject that is not a string instead of throwing', () => {
+    const grade = gradeDecision(adopted, recommendation, [])
+    expect(describeGrade({ ...grade, checkKey: 5 as never, subjectId: undefined as never })).toContain(
+      'Not enough evidence to grade 5 on undefined.',
+    )
+  })
+
+  it('keeps the rest of the JSON contract exactly as it was', () => {
+    const grade = gradeDecision(adopted, recommendation, [row('2026-01-25', 'bad')])
+    expect(grade.method).toBe('exposure_aligned_before_after_on_matched_check')
+    expect(grade.secondary.label).toBe('secondary-not-the-headline')
+    expect(grade.secondary.interpretation).toBe('exposure_unaligned_descriptive_only')
+    expect(grade.secondary.note).toBe(
+      'Every post-decision observation, including ones where the recommendation could not have applied. Descriptive only. It cannot create or reverse the headline verdict.',
+    )
+  })
+
+  it('divergence: no shortfall list when the refused report names no floor it knows', () => {
+    const { overall } = computeDivergence([...agree(7), ...split(3, 'defer')])
+    const text = describeDivergence({ ...overall, status: 'refused', refusalCodes: ['resolved_divergent_below_minimum'] })
+    expect(text).not.toContain('Short on')
+    expect(text).toContain('refused to report divergence (resolved_divergent_below_minimum); 3 of 10 comparable pairs diverged. No conclusion')
+  })
+
+  it('divergence: explains a rate only as displaying at the floor when it really does', () => {
+    const low = computeDivergence([...agree(98), ...split(2, 'keep')])
+    expect(describeDivergence(low.overall, low.thresholds)).toContain(
+      'disagreement rate (2 of 100, 0.05 required).',
+    )
+    const empty = computeDivergence([], { minDivergentRate: 0 })
+    expect(describeDivergence(empty.overall, empty.thresholds)).toContain(
+      'disagreement rate (no comparable pairs, 0 required).',
+    )
+  })
+})

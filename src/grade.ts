@@ -481,8 +481,8 @@ const STRUCTURAL_REASONS: Partial<Record<GradeRefusalCode, string>> = {
 }
 
 /** `<prefix>: <count> [noun], <required> required (met|not met).` */
-function floorLine(prefix: string, count: unknown, required: unknown, noun?: string): string {
-  const met = typeof count === 'number' && typeof required === 'number' && count >= required
+function floorLine(prefix: string, count: number, required: number, noun?: string): string {
+  const met = count >= required
   const shown = noun === undefined ? text(count) : plural(count, noun)
   return `${prefix}: ${shown}, ${text(required)} required (${met ? 'met' : 'not met'}).`
 }

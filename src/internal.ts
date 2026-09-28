@@ -175,7 +175,10 @@ export function parseInstant(name: string, value: string): number {
       `advice-ledger-kit: ${name} must be a date that exists on the calendar (not 2026-02-30 or month 13), received ${describe(value)}`,
     )
   }
-  return Date.parse(match[4] === undefined ? `${value}T00:00:00Z` : value)
+  // A date-only ISO string is UTC midnight by definition, and the grammar
+  // above requires an explicit zone on every timestamp, so nothing here is
+  // read in local time.
+  return Date.parse(value)
 }
 
 /**
@@ -188,7 +191,8 @@ export function text(value: unknown): string {
 
 /** Like `text`, but a string that shows nothing reads `(blank)` instead of vanishing. */
 export function label(value: unknown): string {
-  return typeof value === 'string' && isBlank(value) ? '(blank)' : text(value)
+  if (typeof value !== 'string') return describe(value)
+  return isBlank(value) ? '(blank)' : escapeText(value)
 }
 
 /** `1 observation`, `3 observations`. */

@@ -401,6 +401,26 @@ describe('bug class 3: error messages cannot throw and stay bounded', () => {
     )
   })
 
+  it('cuts a string only when it is longer than 80 characters', () => {
+    expect(describeValue('x'.repeat(80))).toBe(`"${'x'.repeat(80)}"`)
+    expect(describeValue('x'.repeat(81))).toBe(`"${'x'.repeat(80)}"…`)
+  })
+
+  it('names the field and gives the advice in each config error', () => {
+    const cases: Array<[() => unknown, RegExp]> = [
+      [() => resolveDivergenceConfig({ minComparablePairs: 0 }), /minComparablePairs must be an integer >= 1, received 0/],
+      [() => resolveDivergenceConfig({ minDivergentCount: 0 }), /minDivergentCount must be an integer >= 1, received 0/],
+      [() => resolveDivergenceConfig({ minResolvedDivergent: 0 }), /minResolvedDivergent must be an integer >= 1, received 0/],
+      [() => resolveDivergenceConfig({ exampleLimit: -1 }), /exampleLimit must be an integer >= 0, received -1/],
+      [() => resolveGradeConfig({ requireObservedBasis: 'yes' as never }), /requireObservedBasis must be a boolean, received "yes"/],
+      [
+        () => resolveGradeConfig({ proposeThreshold: 3, refuteThreshold: 2 }),
+        /refuteThreshold \(2\) is below proposeThreshold \(3\)\. Overturning a decision must never take less evidence than making the recommendation took\. Raise refuteThreshold to at least proposeThreshold, or lower proposeThreshold to match what the proposal really required\./,
+      ],
+    ]
+    for (const [call, message] of cases) expect(call).toThrow(message)
+  })
+
   it('formats bigint, symbol, function, array, object and long-string values', () => {
     expect(describeValue(1n)).toBe('1n')
     expect(describeValue(Symbol('x'))).toBe('a symbol')

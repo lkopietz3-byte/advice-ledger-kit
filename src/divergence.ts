@@ -256,7 +256,7 @@ export function computeDivergence(
 
   const groups = [...buckets.keys()]
     .sort()
-    .map((key) => reportFor(key, buckets.get(key) ?? [], thresholds))
+    .map((key) => reportFor(key, buckets.get(key) as Entry[], thresholds))
 
   return {
     overall: reportFor(null, entries, thresholds),
