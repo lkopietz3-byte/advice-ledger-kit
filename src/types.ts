@@ -436,7 +436,7 @@ export interface DivergenceReport {
   status: 'reportable' | 'refused'
   refusalCodes: DivergenceRefusalCode[]
   calibration: CalibrationReading
-  /** Divergent pairs, capped at `exampleLimit`, in input order. These are your own pair objects, not copies. */
+  /** Divergent pairs, capped at `exampleLimit`, in input order. These are shallow copies of your pairs (every own enumerable field), taken once before counting, not your own objects. */
   examples: JudgmentPair[]
   interpretation: 'disagreement_is_a_signal_not_a_verdict'
 }

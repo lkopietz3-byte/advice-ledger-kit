@@ -5,7 +5,7 @@ Mapped on **2026-09-26** from connected GitHub, Vercel, and Supabase metadata. T
 ## Identity and repository settings
 
 - Repository: [lkopietz3-byte/advice-ledger-kit](https://github.com/lkopietz3-byte/advice-ledger-kit)
-- Purpose: A library for grading recommendation systems against user outcomes and overrides, with safeguards that return no verdict when evidence floors are unmet.
+- Purpose: A small library that grades individual adopt-or-dismiss decisions on recommendations against later observations, and counts engine-versus-human disagreements. It returns no verdict when evidence floors are unmet, and reports an association, not causation. It does not estimate causal effects, significance, or probability calibration, and it does not deduplicate or store your log.
 - GitHub visibility: **public**; default branch: **`main`**; archived: **no**.
 - Product stage, owner, production health, and GitHub protection/settings beyond the fields above: **not verified**.
 
