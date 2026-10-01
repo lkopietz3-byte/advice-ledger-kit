@@ -10,13 +10,13 @@ Keep automatic code reviews off during preparation. Request one focused `@codex 
 
 When this repo enters sustained launch or customer-facing development, enable its repository setting individually with **All PRs / On PR open / Exhaustive Off**. Keep the personal automatic default and credit-funded reviews off. Inspect the first result before expanding cadence. Review guidance lives in the root [AGENTS.md](../AGENTS.md); it supplements existing tests and release requirements.
 
-On September 30, 2026, this repository was verified to **Follow personal preferences**, with personal automatic code reviews, exhaustive reviews and credit-funded reviews off. These settings are managed in ChatGPT; this file does not activate them.
+Reported historical observation (September 30, 2026): this repository followed personal preferences, with personal automatic, exhaustive and credit-funded reviews off. Current settings are unknown in this note; check them in ChatGPT before changing review cadence. Committing this file does not change them.
 
 ## Next preparation task
 
-Reconcile the published 0.2.0 timestamp/refusal rules and headline-versus-secondary examples with honesty-mcp's grade_decision and compute_divergence schemas and descriptions on the actual consumed versions.
+honesty-mcp 0.2.0 already declares advice-ledger-kit ^0.2.0 and ships grade_decision and compute_divergence wrappers. Keep an installed-consumer regression example for zoned timestamp boundaries, floor refusals, headline versus secondary outcomes and separate engine/human counts as either package changes.
 
-Finish condition: A clean installed consumer shows a zoned boundary case, an unmet-floor refusal and separate engine/human outcomes; descriptions agree with the real API and current dependency resolution.
+Finish condition: On a future candidate, a clean installed consumer exercises those cases and its tool descriptions agree with the resolved package APIs. Passing this repository's checks alone does not prove the cross-package behavior.
 
 ## Declared verification commands
 
