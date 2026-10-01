@@ -1,6 +1,8 @@
 # Review and launch readiness
 
-Prepared September 30, 2026 against GitHub main `ea995d3ab2384dba8d892cce55af2e3f314bbba7`. This is a preparation plan, not a completed product audit or marketing certification.
+Updated September 30, 2026 against GitHub main `ea995d3ab2384dba8d892cce55af2e3f314bbba7`. This note prepares review of work after the 0.2.0 release; it is not a completed product audit or marketing certification.
+
+Registry check on September 30, 2026 returned `advice-ledger-kit@0.2.0` with gitHead `ea995d3`, matching the inspected main. This confirms the registry version and recorded source commit, not consumer behavior or adoption.
 
 ## Review cadence
 
@@ -12,13 +14,13 @@ On September 30, 2026, this repository was verified to **Follow personal prefere
 
 ## Next preparation task
 
-Reconcile the release's timestamp/refusal rules and headline-versus-secondary examples with honesty-mcp's grade_decision and compute_divergence schemas and descriptions on the actual consumed versions.
+Reconcile the published 0.2.0 timestamp/refusal rules and headline-versus-secondary examples with honesty-mcp's grade_decision and compute_divergence schemas and descriptions on the actual consumed versions.
 
 Finish condition: A clean installed consumer shows a zoned boundary case, an unmet-floor refusal and separate engine/human outcomes; descriptions agree with the real API and current dependency resolution.
 
 ## Declared verification commands
 
-Read from the inspected main's `package.json`. These are declared gates, not execution receipts; see the candidate PR for hosted-check results and report unavailable checks explicitly. Use focused checks during implementation and the existing release gates on the frozen candidate.
+Read from the inspected main's `package.json`. These are declared gates; the PR records execution results for its final head. Use focused checks during implementation and the existing release gates on the frozen candidate.
 
 - `npm run verify`: `npm run lint && npm run typecheck && npm test && npm run build && npm run verify:package`
 - `npm run lint`: `eslint . --max-warnings=0`
