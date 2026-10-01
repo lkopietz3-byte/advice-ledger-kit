@@ -22,3 +22,13 @@ Grade decisions on a recommender's advice against later observations, refusing w
 - Do not run `npm publish` or push tags without explicit permission. Treat any claim that a version is published as Reported until the registry confirms it.
 - Runtime `dependencies` stay empty; add dev tooling only.
 - Keep unrelated uncommitted work intact; never stage or reset the whole tree.
+
+## Review preparation
+
+See [docs/REVIEW_READINESS.md](docs/REVIEW_READINESS.md) for milestone review cadence, declared verification gates and the next launch-preparation task.
+
+## Code Review Rules
+
+- Preserve floor-based refusals, structural short-circuits and exposed-only headline evidence; label secondary outcomes separately. A holding verdict requires both the raw-count refutation threshold and the exact exposed-rate comparison, never rounded display fields.
+- Preserve single-read validated snapshots and parsed-instant window semantics: dates are UTC midnight, timestamps need explicit zones, invalid rows/dates throw and equal instants share the same boundary. Do not silently deduplicate or authenticate caller-supplied exposure/outcome labels.
+- Keep engine-right, human-right and neither-right counts distinct and consistent with resolved divergence. Empty-denominator rates remain null; minimum floors are not significance, causal-effect or probability-calibration evidence.
