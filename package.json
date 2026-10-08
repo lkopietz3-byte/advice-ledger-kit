@@ -1,6 +1,6 @@
 {
   "name": "advice-ledger-kit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Grade decisions on a recommender's advice against later observations, refusing with machine-readable codes when before/after or exposure floors are not met, and measure engine-versus-human disagreement with engine-right and human-right counts kept separate.",
   "keywords": [
     "recommendation-evaluation",
@@ -11,7 +11,8 @@
     "exposure-alignment",
     "inter-rater-disagreement",
     "refusal-codes",
-    "typescript"
+    "typescript",
+    "honesty-kits"
   ],
   "author": "Lucas Kopietz",
   "license": "MIT",
@@ -19,7 +20,7 @@
     "type": "git",
     "url": "git+https://github.com/lkopietz3-byte/advice-ledger-kit.git"
   },
-  "homepage": "https://github.com/lkopietz3-byte/advice-ledger-kit#readme",
+  "homepage": "https://lkopietz3-byte.github.io/honesty-kits/#advice-ledger-kit",
   "bugs": {
     "url": "https://github.com/lkopietz3-byte/advice-ledger-kit/issues"
   },
