@@ -93,13 +93,14 @@ describe('grade floors at, below and above the threshold', () => {
     expect(grade.badRateDelta).toBe(0.233)
   })
 
-  it('holds when the exposed rate is lower or exactly equal, never higher, than the baseline', () => {
+  it('holds when the exposed rate is strictly lower; an exact tie with a nonzero baseline does not hold', () => {
     // 4 of 8 before (0.5), 1 of 4 exposed since (0.25): rate went down, count
     // (1) below the bar. Holds.
     expect(gradeDecision(dec, rec, [...before(4, 4), ...after(1, 3)]).verdict).toBe('holding')
-    // 1 of 8 before (0.125), 1 of 8 exposed since (0.125): exact tie is not
-    // "higher", so it still holds.
-    expect(gradeDecision(dec, rec, [...before(1, 7), ...after(1, 7)]).verdict).toBe('holding')
+    // 1 of 8 before (0.125), 1 of 8 exposed since (0.125): an exact tie is not
+    // "higher", but the problem did not go down either, so it does not hold.
+    // (Changed 2026-10-10: this assertion used to expect 'holding'.)
+    expect(gradeDecision(dec, rec, [...before(1, 7), ...after(1, 7)]).verdict).toBe('not-holding')
   })
 
   it('compares the exact ratio, not the rounded badRate, when they disagree', () => {

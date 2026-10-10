@@ -134,11 +134,18 @@ function refGrade(
   // eBad/eN > bBad/bN  <=>  eBad*bN > bBad*eN.
   const exposedRateHigher = BigInt(eBad) * BigInt(bN) > BigInt(bBad) * BigInt(eN)
   const blindRateHigher = BigInt(aBad) * BigInt(bN) > BigInt(bBad) * BigInt(aN)
+  // A tie with a nonzero baseline rate is not an improvement (2026-10-10).
+  // With a clean baseline (only reachable with minBaselineBadObservations: 0)
+  // a window with no bad observation either still holds.
+  const exposedRateLower = BigInt(eBad) * BigInt(bN) < BigInt(bBad) * BigInt(eN)
+  const blindRateLower = BigInt(aBad) * BigInt(bN) < BigInt(bBad) * BigInt(aN)
+  const exposedNoImprovement = bBad > 0 && !exposedRateLower
+  const blindNoImprovement = bBad > 0 && !blindRateLower
 
   return {
     verdict: (codes.length > 0
       ? 'refused'
-      : eBad >= c.refuteThreshold || exposedRateHigher
+      : eBad >= c.refuteThreshold || exposedRateHigher || exposedNoImprovement
         ? 'not-holding'
         : 'holding'),
     refusalCodes: codes,
@@ -151,7 +158,7 @@ function refGrade(
       badRate: refRate(aBad, aN),
       wouldBeVerdict: (blindRefused
         ? 'refused'
-        : aBad >= c.refuteThreshold || blindRateHigher
+        : aBad >= c.refuteThreshold || blindRateHigher || blindNoImprovement
           ? 'not-holding'
           : 'holding'),
     },

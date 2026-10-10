@@ -8,9 +8,13 @@
   `secondary` is labeled non-headline and its `wouldBeVerdict` applies the
   same floors.
 - `holding` requires both a count below `refuteThreshold` AND an exposed bad
-  rate not higher than the baseline's; either failing gives `not-holding`.
-  The rate check cross-multiplies the raw counts, never the rounded `badRate`
-  or `badRateDelta` fields.
+  rate strictly lower than the baseline's; either failing gives
+  `not-holding`. The one exception is a baseline with no bad observation
+  (`minBaselineBadObservations: 0`): an exposed window with none either is
+  `holding`. An equal nonzero rate is a tie and is `not-holding` (decided
+  2026-10-10 to keep the verdict set `holding`, `not-holding`, `refused`
+  unchanged). The rate checks cross-multiply the raw counts, never the
+  rounded `badRate` or `badRateDelta` fields.
 - `refuteThreshold >= proposeThreshold`, or `resolveGradeConfig` throws.
 - Divergence needs the comparable-pair, count and rate floors; the rate floor
   uses the exact ratio, never the rounded display rate.
@@ -63,7 +67,11 @@ implementation on seeded random inputs.
   guessed, and a bare date is UTC midnight. A source that exported local time
   without a zone must be converted before calling.
 - No deduplication of observations or pairs.
-- `exposed` and `laterOutcome` are trusted as given.
+- `exposed` and `laterOutcome` are type-checked (a boolean and a string; other
+  types throw) but their values are trusted as given.
+- The refute bar is a fixed count, not a rate, so a long window can reach it
+  while the bad rate falls. This is deliberate; `describeGrade` reports the
+  rate drop.
 
 ## Are the types wrong? (attw)
 

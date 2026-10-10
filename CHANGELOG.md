@@ -4,6 +4,65 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+Fixes from a 2026-10-10 review. Two of them change what a call returns or
+accepts, so `honesty-mcp` (`grade_decision`, `compute_divergence`) needs to
+mirror them. The set of verdict values, the refusal codes, the JSON fields
+and the export names are unchanged. No version bump yet.
+
+### Fixed
+
+- **A tie in the bad rate was graded `holding`.** 3 of 4 bad before and 3 of 4
+  bad exposed since (with `refuteThreshold: 4`), or 1 of 3 against 1 of 3 with
+  the defaults, read as "the problem stayed away" when it had not gone down at
+  all. When the baseline has bad observations, the exposed window now has to
+  be strictly lower to hold; an equal rate is `not-holding`. The comparison is
+  still exact (cross-multiplied counts), so it also catches ties that display
+  the same rounded rate. `secondary.wouldBeVerdict` follows the same rule.
+  Zero bad before and zero bad since (reachable with
+  `minBaselineBadObservations: 0`) stays `holding`.
+- **A non-boolean `exposed` was read as "not exposed".** `"true"`, `1`, `"yes"`
+  or `null` on a matching observation could hide bad rows and turn a failing
+  decision into `holding`. It now throws a `TypeError`, on baseline rows too,
+  as a malformed `state` already did.
+- **A non-string `laterOutcome` was read as "not settled yet".** A number,
+  boolean or `null` shrank the resolved count and hid who was right. It now
+  throws a `TypeError` (omit it, or use `''`, while a pair is unsettled).
+
+### Changed (behavior)
+
+- `gradeDecision`: a tie in the bad rate against a nonzero baseline is
+  `not-holding` instead of `holding` (see above). The existing `not-holding`
+  value is used, so code that switches on the verdict needs no new branch, but
+  it will see `not-holding` where it used to see `holding` for exact ties.
+- `gradeDecision` throws a `TypeError` for an `exposed` that is not `true`,
+  `false` or omitted, and `computeDivergence` throws a `TypeError` for a
+  `laterOutcome` that is present and not a string. Callers that pass `null` for
+  "unknown" must omit the key or use `''` in `computeDivergence`.
+- `describeGrade`: a tie reads "the exposed bad rate (1 of 3) is not lower than
+  the baseline's (1 of 3), compared as exact counts, so the problem did not go
+  down." When the count bar decides while the exposed rate is lower than the
+  baseline's (6 of 6 before, 2 of 60 since), the sentence now says the rate
+  fell and that the refute threshold is a fixed count. The sentence for a
+  `holding` grade and the JSON are unchanged.
+
+### Documented
+
+- The refute bar is a fixed count, not a rate, so a long window can reach it
+  while the bad rate falls sharply (6 of 6 before, 2 of 60 since is
+  `not-holding`). This is deliberate and now stated in the README and
+  `ENGINEERING.md`, with the advice to bound the window or raise
+  `refuteThreshold`.
+- A date-only `decidedAt` is UTC midnight, so for a caller west of UTC the
+  previous local evening counts as after the decision (worked example in the
+  README).
+- Text in different Unicode forms (NFC and NFD) compares as different in
+  `computeDivergence`; normalize labels first.
+- A non-string `engineJudgment` or `humanJudgment` makes a pair not
+  comparable rather than throwing.
+- `exposed` and `laterOutcome` are type-checked but their values are trusted.
+
 ## [0.2.1] - 2026-10-07
 
 No change to the library's behavior or API.

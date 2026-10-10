@@ -29,6 +29,6 @@ See [docs/REVIEW_READINESS.md](docs/REVIEW_READINESS.md) for milestone review ca
 
 ## Code Review Rules
 
-- Preserve floor-based refusals, structural short-circuits and exposed-only headline evidence; label secondary outcomes separately. A holding verdict requires both the raw-count refutation threshold and the exact exposed-rate comparison, never rounded display fields.
+- Preserve floor-based refusals, structural short-circuits and exposed-only headline evidence; label secondary outcomes separately. A holding verdict requires both the raw-count refutation threshold and an exact exposed rate strictly below the baseline's (a tie is not-holding), never rounded display fields.
 - Preserve single-read validated snapshots and parsed-instant window semantics: dates are UTC midnight, timestamps need explicit zones, invalid rows/dates throw and equal instants share the same boundary. Do not silently deduplicate or authenticate caller-supplied exposure/outcome labels.
 - Keep engine-right, human-right and neither-right counts distinct and consistent with resolved divergence. Empty-denominator rates remain null; minimum floors are not significance, causal-effect or probability-calibration evidence.

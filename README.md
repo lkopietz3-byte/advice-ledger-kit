@@ -141,14 +141,22 @@ exposure-blind grader would have said `not-holding`.
    before `decidedAt` form the **baseline**. Observations after `decidedAt`
    form the post-decision window, and those with `exposed === true` form the
    **result** (the headline). `exposed: false` and a missing flag both count
-   as not exposed. Observations at the same instant as `decidedAt`, however
+   as not exposed; any other `exposed` value on a matching row (`"true"`, `1`,
+   `"yes"`, `null`) throws a `TypeError` instead of being read as not exposed.
+   Observations at the same instant as `decidedAt`, however
    the two are written, grade neither window and are counted in
    `atBoundaryObservations`.
 4. **Floors.** Each failing floor adds a code, and all failing floors are
    listed together.
-5. **Verdict.** If no floor fails: `not-holding` when EITHER the result has
-   at least `refuteThreshold` bad observations OR its bad rate is higher than
-   the baseline's, otherwise `holding`.
+5. **Verdict.** If no floor fails: `holding` only when the result has fewer
+   than `refuteThreshold` bad observations AND its bad rate is strictly lower
+   than the baseline's. Anything else is `not-holding`: the result reaches
+   `refuteThreshold` bad observations, OR its rate is higher than the
+   baseline's, OR its rate equals a nonzero baseline rate (3 of 4 before and 3
+   of 4 since is the same problem at the same pace, not a decision that held).
+   The one case where a clean exposed window is compared with a clean baseline
+   (0 bad of both, reachable only with `minBaselineBadObservations: 0`) is
+   `holding`, because the problem stayed away.
 
 The rate check is exact: it compares the raw counts by cross-multiplication
 (`result.bad * baseline.observations` against
@@ -157,18 +165,27 @@ the sign of `badRateDelta`. That matters right at a rounding boundary: 81 bad
 of 650 before (0.1246...) and 1 bad of 8 exposed since (0.125 exactly) both
 display as `badRate: 0.125`, so `badRateDelta` shows `0`, and yet the exposed
 rate is a hair higher than the baseline's, so the verdict is `not-holding`.
-Show `badRateDelta` and the raw counts next to the verdict; do not re-derive
-the verdict from `badRateDelta`'s sign.
+The tie rule uses the same exact comparison: 9 of 72 before and 1 of 8 since
+are exactly equal, also display 0.125, and are also `not-holding`. Show
+`badRateDelta` and the raw counts next to the verdict; do not re-derive the
+verdict from `badRateDelta`'s sign. (A verdict of `not-holding` with a
+`badRateDelta` of `0` is a tie, or a rounding-boundary case like the one
+above.)
 
 The verdict grades the decision and reads the same either way the human
 called it:
 
 | Decision | Exposed bad count and rate after | Verdict |
 | --- | --- | --- |
-| adopted | count below `refuteThreshold` AND rate not above baseline | `holding` |
-| adopted | count at/above `refuteThreshold` OR rate above baseline | `not-holding` |
-| dismissed | count below `refuteThreshold` AND rate not above baseline | `holding` (the pass looks fine) |
-| dismissed | count at/above `refuteThreshold` OR rate above baseline | `not-holding` (the evidence sided with the advice) |
+| adopted | count below `refuteThreshold` AND rate below baseline | `holding` |
+| adopted | count at/above `refuteThreshold` OR rate at or above baseline | `not-holding` |
+| dismissed | count below `refuteThreshold` AND rate below baseline | `holding` (the pass looks fine) |
+| dismissed | count at/above `refuteThreshold` OR rate at or above baseline | `not-holding` (the evidence sided with the advice) |
+
+(With a baseline that has no bad observations, which needs
+`minBaselineBadObservations: 0`, "rate below baseline" cannot happen; a
+result with no bad observation either is `holding`, and any bad observation
+is `not-holding`.)
 
 For a dismissed recommendation, set `exposed: true` on occasions where the
 advice would have applied had it been adopted.
@@ -205,6 +222,15 @@ try { at('2026-99-99') } catch (e) { console.log(e.name) }         // RangeError
 ```
 
 Other input rules, all `TypeError`s:
+
+- `exposed` on a matching observation must be `true`, `false` or omitted.
+  `"true"`, `1`, `"yes"` and `null` throw, on a baseline row too, because
+  reading them as "not exposed" would silently hide bad rows. In
+  `computeDivergence`, `laterOutcome` must be a string (`''` or omitted
+  means "not settled yet"); a number, boolean or `null` throws, because it
+  would otherwise be read as unsettled and shrink the resolved count. This
+  checks the type only. Whether the flag or outcome is true is still yours
+  to get right (see Honest limits).
 
 - Rows and configs must be plain objects (or null-prototype objects). A `Map`,
   `Date`, array, or class instance is rejected instead of being read as empty
@@ -275,8 +301,14 @@ something and one to condemn it is biased toward "not holding".
 
 Symmetry does not bound the window. The post-decision window is every
 observation you pass, so over a long enough period any nonzero recurrence
-reaches any fixed count. If that matters, pass a bounded window (for
-example, the first N weeks after the decision).
+reaches any fixed count. The count bar is deliberately a fixed count, not a
+rate: 6 of 6 bad before and 2 of 60 bad exposed since (a 97% drop in the
+rate) is `not-holding` because 2 reaches the bar of 2. `describeGrade` says
+when that happens ("The exposed bad rate (2 of 60) is lower than the
+baseline's (6 of 6), but the refute threshold is a fixed count ..."), and
+`badRateDelta` shows the drop in the JSON. If that matters, pass a bounded
+window (for example, the first N weeks after the decision) or raise
+`refuteThreshold` to a count you can defend for the window length.
 
 ## How `computeDivergence` works
 
@@ -364,7 +396,8 @@ verdict's rate check compares), `atBoundaryObservations`, the echoed
 Throws `RangeError`/`TypeError` from `resolveGradeConfig`. Throws `RangeError`
 when `decidedAt`, or `observedAt` on a matching observation, is a non-empty
 string that is not a valid date or timestamp (see "Input rules"). Throws
-`TypeError` when the decision, recommendation, or a row is not a plain object,
+`TypeError` when a matching observation has an `exposed` other than `true`,
+`false` or omitted, when the decision, recommendation, or a row is not a plain object,
 `observations` is not a dense array, `recommendation.id`,
 `recommendation.subjectId` or `decision.recommendationId` is not a string or
 is blank, `basis` is not `'observed'` or `'model-proposed'`, `status` is not
@@ -379,9 +412,13 @@ One line of plain text: result, evidence, reason, next step, limits.
 
 - A verdict reads "Holding: ... was bad in B of N observations before and b of
   n exposed observations since the recommendation was adopted on ...", says
-  which rule decided (the count reaching `refuteThreshold`, or the exact rate
+  which rule decided (the count reaching `refuteThreshold`, the exact rate
   being higher than the baseline's, with a note when both rates display the
-  same), and ends with the association-not-causation note.
+  same, or the exact rate being equal to the baseline's, "not lower ... so the
+  problem did not go down"), and ends with the association-not-causation
+  note. When the count bar decides while the exposed rate is lower than the
+  baseline's, the sentence also says the rate fell and that the threshold is
+  a fixed count.
 - Thin evidence reads "Not enough evidence to grade ...", then before, after
   and confirmed-exposed-after counts against the required counts (plus the
   bad-before count when that floor failed), why it matters, what to check, and
@@ -414,7 +451,8 @@ Returns `{ overall, groups, thresholds }`. Each report has `group`,
 first `exampleLimit` divergent pairs, as shallow copies), and
 `interpretation: 'disagreement_is_a_signal_not_a_verdict'`. Pairs are not
 deduplicated, even when they share an `id`. Throws `RangeError` from
-`resolveDivergenceConfig` and `TypeError` for a bad `groupBy` return.
+`resolveDivergenceConfig` and `TypeError` for a bad `groupBy` return or a
+`laterOutcome` that is present and not a string.
 
 ### `describeDivergence(report, thresholds?) => string`
 
@@ -452,18 +490,25 @@ shipped `.d.ts` files.
 ## Honest limits
 
 - **Association, not causation.** A `holding` verdict means the floors were
-  met and exposed recurrences stayed under the refute bar. It does not show
+  met, exposed recurrences stayed under the refute bar and the exposed bad
+  rate fell below the baseline's. It does not show
   the advice caused anything. Seasonality, other changes, regression to the
   mean, and extra attention to the subject are all possible explanations.
 - **No statistics beyond counts.** The floors are minimum counts, not
   significance tests. Clearing them means "enough to look at", not "proven".
 - **The rate check only compares two windows, not a trend.** `holding`
-  requires the exposed bad rate not to exceed the baseline's, but that is one
+  requires the exposed bad rate to be below the baseline's, but that is one
   before/after comparison, not a slope or a significance test. A rate that
   crept up gradually across a long post-decision window and a rate that
   spiked on day one look the same to this check.
-- **The window is whatever you pass.** There is no time limit on the
-  post-decision window, so a long window will eventually reach any count.
+- **The refute bar is a fixed count, and the window is whatever you pass.**
+  There is no time limit on the post-decision window, so a long window will
+  eventually reach any count, even while the bad rate falls sharply (6 of 6
+  before, 2 of 60 since is `not-holding`). The rule is deliberate: a rate-only
+  bar would let a handful of readings clear a decision, and a scaled bar
+  needs a statistical model this library does not have. `describeGrade`
+  reports the rate drop when this happens. Bound the window or raise
+  `refuteThreshold` if it matters.
 - **It will often refuse.** With the default floors, a decision needs at
   least 3 observations before and 3 exposed observations after, so a young
   ledger often comes back refused. That is the intended behavior. Setting every
@@ -471,19 +516,31 @@ shipped `.d.ts` files.
   floors only for a reason you can state about your observation rate.
 - **Baselines can mislead.** The baseline is everything before the decision.
   If that period was unusual, nothing here detects it.
-- **`exposed` is trusted.** If exposure is logged more reliably on good
-  occasions, that bias goes straight into the headline.
+- **`exposed` and `laterOutcome` are trusted.** Their types are checked
+  (`exposed` must be a boolean, `laterOutcome` a string), but their values are
+  not verified. If exposure is logged more reliably on good occasions, that
+  bias goes straight into the headline.
 - **Timestamps are yours to get right.** The library parses instants strictly
   and throws on anything outside the grammar above, but it cannot know that a
   bare `2026-02-01` you meant as local midnight is UTC midnight here, or that
-  a timestamp exported without its zone was really in local time. Convert
-  those at the boundary. Timestamps with more than three fractional digits
+  a timestamp exported without its zone was really in local time. For
+  example, a date-only `decidedAt` of `2026-02-01` is 18:00 on January 31 in
+  Chicago, so a 9 pm January 31 local inspection (03:00Z on February 1) counts
+  as after the decision. Pass a timestamp with the decision's real zone when
+  the hour matters. Convert those at the boundary. Timestamps with more than three fractional digits
   (for example microseconds) are rejected, so truncate them first.
   `proposedAt` is not read.
 - **No deduplication.** Repeated observation rows and repeated pairs are
   counted each time. Deduplicate before calling if repeats are errors.
-- **Exact string matching.** `subjectId`, `checkKey` and judgments are
-  compared exactly. A whitespace-only judgment counts as a judgment.
+- **Exact string matching.** `subjectId`, `checkKey`, judgments and
+  `laterOutcome` are compared exactly. A whitespace-only judgment counts as a
+  judgment. The same text in different Unicode forms (a precomposed "é" in NFC
+  and "e" plus a combining accent in NFD) compares as different, so a pair
+  whose two judgments differ only that way counts as a disagreement. Call
+  `String.prototype.normalize('NFC')` on your labels before passing them.
+- **Non-string judgments are skipped, not rejected.** A pair whose
+  `engineJudgment` or `humanJudgment` is missing, empty or not a string does
+  not count as comparable (it still counts in `totalPairs`).
 - **Disagreement is a place to look.** Divergence says one judge is wrong,
   not which one; that needs `laterOutcome`, and `calibration` refuses until
   enough outcomes exist.
