@@ -6,10 +6,29 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Fixes from a 2026-10-10 review. Two of them change what a call returns or
-accepts, so `honesty-mcp` (`grade_decision`, `compute_divergence`) needs to
-mirror them. The set of verdict values, the refusal codes, the JSON fields
-and the export names are unchanged. No version bump yet.
+## [0.3.0] - unreleased
+
+Minor release with three behavior changes: one verdict change and two new
+`TypeError`s. The set of verdict values, the refusal codes, the JSON fields
+and the export names are unchanged. `honesty-mcp` (`grade_decision`,
+`compute_divergence`) needs to mirror them.
+
+### Breaking changes
+
+- **A tie in the bad rate is now `not-holding` (was `holding`).** When the
+  baseline has bad observations and the exposed window's bad rate is equal to
+  it (3 of 4 before and 3 of 4 since, or 1 of 3 against 1 of 3), `gradeDecision`
+  returns `not-holding`. Migration: no code change is needed because the value
+  already exists, but results that used to read `holding` for an exact tie now
+  read `not-holding`. Re-run any stored grades you display or alert on.
+- **A non-boolean `exposed` now throws a `TypeError`.** `"true"`, `1`, `"yes"`
+  or `null` on a matching observation used to be read as "not exposed". It now
+  throws, on baseline rows too. Migration: send `true`, `false` or omit the
+  key; convert strings and numbers at the boundary, and drop `null`.
+- **A non-string `laterOutcome` now throws a `TypeError` in
+  `computeDivergence`.** A number, boolean or `null` used to be read as "not
+  settled yet". Migration: omit the key or use `''` while a pair is unsettled,
+  and send the outcome as a string once it is known.
 
 ### Fixed
 
@@ -22,36 +41,36 @@ and the export names are unchanged. No version bump yet.
   the same rounded rate. `secondary.wouldBeVerdict` follows the same rule.
   Zero bad before and zero bad since (reachable with
   `minBaselineBadObservations: 0`) stays `holding`.
-- **A non-boolean `exposed` was read as "not exposed".** `"true"`, `1`, `"yes"`
-  or `null` on a matching observation could hide bad rows and turn a failing
-  decision into `holding`. It now throws a `TypeError`, on baseline rows too,
-  as a malformed `state` already did.
-- **A non-string `laterOutcome` was read as "not settled yet".** A number,
-  boolean or `null` shrank the resolved count and hid who was right. It now
-  throws a `TypeError` (omit it, or use `''`, while a pair is unsettled).
+- **A non-boolean `exposed` was read as "not exposed".** It could hide bad rows
+  and turn a failing decision into `holding` (see Breaking changes).
+- **A non-string `laterOutcome` was read as "not settled yet".** It shrank the
+  resolved count and hid who was right (see Breaking changes).
 
-### Changed (behavior)
+### Changed
 
-- `gradeDecision`: a tie in the bad rate against a nonzero baseline is
-  `not-holding` instead of `holding` (see above). The existing `not-holding`
-  value is used, so code that switches on the verdict needs no new branch, but
-  it will see `not-holding` where it used to see `holding` for exact ties.
-- `gradeDecision` throws a `TypeError` for an `exposed` that is not `true`,
-  `false` or omitted, and `computeDivergence` throws a `TypeError` for a
-  `laterOutcome` that is present and not a string. Callers that pass `null` for
-  "unknown" must omit the key or use `''` in `computeDivergence`.
 - `describeGrade`: a tie reads "the exposed bad rate (1 of 3) is not lower than
   the baseline's (1 of 3), compared as exact counts, so the problem did not go
   down." When the count bar decides while the exposed rate is lower than the
   baseline's (6 of 6 before, 2 of 60 since), the sentence now says the rate
   fell and that the refute threshold is a fixed count. The sentence for a
-  `holding` grade and the JSON are unchanged.
+  `holding` grade and the JSON are unchanged. Match on the JSON, not the text.
 
 ### Documented
 
+- The README now says who the kit fits (a log with dated `good` and `bad`
+  readings of the same check on the same subject, before and after a decision)
+  and who it does not (decision records with no observations, event logs as
+  they are), and adds a tested recipe for turning an event log into readings,
+  with a warning that the bucket size can change the verdict.
+- New entries in the honest limits: a verdict can hinge on one reading; a
+  same-day find and fix on date-only data sits on the boundary and can refuse;
+  a key mismatch looks like a young ledger; advice that was replaced has no
+  window end; timestamp formats from git and Python need reformatting first;
+  `computeDivergence` text says "the human" and "the engine" for any two
+  judges. The divergence refusal codes are listed.
 - The refute bar is a fixed count, not a rate, so a long window can reach it
   while the bad rate falls sharply (6 of 6 before, 2 of 60 since is
-  `not-holding`). This is deliberate and now stated in the README and
+  `not-holding`). This is deliberate and stated in the README and
   `ENGINEERING.md`, with the advice to bound the window or raise
   `refuteThreshold`.
 - A date-only `decidedAt` is UTC midnight, so for a caller west of UTC the

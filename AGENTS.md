@@ -1,4 +1,4 @@
-# advice-ledger-kit — agent instructions
+# advice-ledger-kit: agent instructions
 
 Grade decisions on a recommender's advice against later observations, refusing with machine-readable codes when before/after or exposure floors are not met, and measure engine-versus-human disagreement with engine-right and human-right counts kept separate.
 

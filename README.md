@@ -19,14 +19,29 @@ The shapes are generic: a recommendation is `{ subjectId, checkKey }`, an
 observation is `good` or `bad`, and judgments are strings from your own
 vocabulary.
 
-**Use it when** you log recommendations, the human call on each one, and
-dated outcomes afterward, and you want a grade that refuses rather than
-guesses when the log is thin.
+### Who it fits
 
-**Do not use it when** you need a causal effect estimate (use a randomized
-experiment), a significance test or confidence interval (this library has
-none), probability calibration of a model's scores, or deduplication and
-cleaning of your log (it counts exactly what you pass).
+It fits a log that holds three things for the same subject and the same check:
+a recommendation, the human call on it (adopted or dismissed), and dated
+`good` or `bad` readings of that check taken before and after the call. A
+maintenance system with weekly inspections, an audit-driven product loop, or a
+rule-suggestion engine whose rules are later re-checked are the usual shapes.
+You get a grade that refuses rather than guesses when the log is thin.
+
+### Who it does not fit
+
+- **Decision records with no observations.** A decision log, ADR folder or
+  DECISIONS.md has a decision and a reason, but no check key, no baseline and
+  no later readings. There is nothing to grade, and every call comes back
+  refused. Adding readings after the fact is a data project of its own.
+- **Event logs.** A list of incidents, fix commits or audit findings has only
+  the bad events. You have to decide what a quiet period counts as `good` and
+  how long a period is, and the verdict depends on that choice. See "Turning an
+  event log into readings" for how to do it on purpose.
+- **Anything that needs a causal effect estimate** (use a randomized
+  experiment), a significance test or confidence interval (this library has
+  none), probability calibration of a model's scores, or deduplication and
+  cleaning of your log (it counts exactly what you pass).
 
 ## Install
 
@@ -310,6 +325,64 @@ baseline's (6 of 6), but the refute threshold is a fixed count ..."), and
 window (for example, the first N weeks after the decision) or raise
 `refuteThreshold` to a count you can defend for the window length.
 
+### Turning an event log into readings
+
+An event log (incidents, fix commits, audit findings) lists only the bad
+moments. `gradeDecision` needs both: a `bad` or `good` reading for each period
+you watched, before and after the decision. One way to build them, with fixed
+buckets that line up with the decision date:
+
+```js
+// Uses `recommendation` and `decision` from the quickstart (decided 2026-02-01).
+const DAY = 86_400_000
+const day = (s) => Date.parse(`${s}T00:00:00Z`) // 'YYYY-MM-DD' as UTC midnight
+const iso = (ms) => new Date(ms).toISOString().slice(0, 10)
+
+// incidents: dates when the problem happened. from/to: the span you actually
+// watched. Buckets tile around decidedOn, so none of them straddles it.
+function bucketReadings({ incidents, decidedOn, from, to, subjectId, checkKey, bucketDays = 7 }) {
+  const d0 = day(decidedOn)
+  const bucketOf = (ms) => Math.floor((ms - d0) / (bucketDays * DAY)) // 0 starts on decidedOn
+  const bad = new Set(incidents.map((d) => bucketOf(day(d))))
+  const rows = []
+  for (let b = bucketOf(day(from)); b <= bucketOf(day(to)); b++) {
+    // Dated on the bucket's last day, so before-buckets fall before the decision
+    // and after-buckets fall after it.
+    const observedAt = iso(d0 + ((b + 1) * bucketDays - 1) * DAY)
+    const row = { subjectId, checkKey, observedAt, state: bad.has(b) ? 'bad' : 'good' }
+    if (b >= 0) row.exposed = true // no exposure concept here; see "Exposure alignment"
+    rows.push(row)
+  }
+  return rows
+}
+
+const rows = bucketReadings({
+  incidents: ['2026-01-06', '2026-01-13', '2026-01-27', '2026-02-03'],
+  decidedOn: '2026-02-01', from: '2026-01-04', to: '2026-03-28',
+  subjectId: 'pump-14', checkKey: 'seal-leak',
+})
+const grade = gradeDecision(decision, recommendation, rows)
+console.log(grade.verdict, grade.baseline, grade.result)
+// holding { observations: 4, bad: 3, good: 1, badRate: 0.75 } { observations: 8, bad: 1, good: 7, badRate: 0.125 }
+```
+
+What to settle before you trust the result:
+
+- **A quiet bucket is only `good` if you were watching.** Set `from` and `to` to
+  the span the log really covers. Outside it, no reading is better than an
+  invented `good`.
+- **The bucket size changes the verdict.** The same dated incidents bucketed
+  weekly, monthly or quarterly give different baselines, different counts and
+  sometimes a different verdict. In one trial on a year of incident history
+  around a single decision, weekly buckets graded `holding` while monthly and
+  quarterly buckets graded `not-holding`. Pick the size from how often you
+  would really have looked, before you see the result, and keep it.
+- **Mind the decision day.** An incident on the decision day lands in the first
+  bucket after it here. If the incident is what prompted the advice, move it
+  into the baseline on purpose (or leave it out) and say so.
+- **Do not overlap buckets.** Use one bucket per period, not rolling windows;
+  overlapping buckets count the same incident more than once.
+
 ## How `computeDivergence` works
 
 A pair is **comparable** when both `engineJudgment` and `humanJudgment` are
@@ -328,6 +401,13 @@ Divergence is `reportable` only when all three floors pass:
   0.05 and is still refused at a 0.05 floor.
 
 Counts and rates are always returned. The floors gate `status`.
+
+| Code | Fires when |
+| --- | --- |
+| `comparable_pairs_below_minimum` | comparable pairs < `minComparablePairs` (default 10) |
+| `divergent_count_below_minimum` | disagreements < `minDivergentCount` (default 3), including zero |
+| `divergent_rate_below_minimum` | the exact share of disagreements is below `minDivergentRate` (default 0.05), or there are no comparable pairs |
+| `resolved_divergent_below_minimum` | calibration only: disagreements with a later outcome < `minResolvedDivergent` (default 3) |
 
 **Calibration.** For divergent pairs with a non-empty `laterOutcome`,
 `engineRight`, `humanRight` and `neitherRight` partition the resolved pairs
@@ -388,7 +468,7 @@ Grades one decision as described above. Returns `verdict`, `refusalCodes`,
 the `baseline`, `result` and `secondary` windows (`observations`, `bad`,
 `good`, `badRate` rounded to 3 places with exact halves up, `null` when
 empty), `badRateDelta` (`result.badRate - baseline.badRate` from the rounded
-rates, `null` when either window is empty — display only, not what the
+rates, `null` when either window is empty; display only, not what the
 verdict's rate check compares), `atBoundaryObservations`, the echoed
 `thresholds`, and constant `method` and
 `interpretation: 'association_not_causation'` labels.
@@ -527,9 +607,35 @@ shipped `.d.ts` files.
   example, a date-only `decidedAt` of `2026-02-01` is 18:00 on January 31 in
   Chicago, so a 9 pm January 31 local inspection (03:00Z on February 1) counts
   as after the decision. Pass a timestamp with the decision's real zone when
-  the hour matters. Convert those at the boundary. Timestamps with more than three fractional digits
-  (for example microseconds) are rejected, so truncate them first.
-  `proposedAt` is not read.
+  the hour matters. Convert at the boundary: timestamps with more than three
+  fractional digits (Python's `isoformat()` microseconds), a zone written
+  without a colon (`+0200`, git's `%z`), or a space instead of `T` are
+  rejected, so reformat them first. `proposedAt` is not read.
+- **Date-only data puts a same-day find and fix on the boundary.** If a
+  finding and the decision share a date, that reading sits at the decision
+  instant and is graded in neither window. It shows up only as
+  `atBoundaryObservations`, so a ledger whose only bad reading is the finding
+  itself comes back refused with `baseline_lacks_negative_signal`. If your
+  data is date-only and that matters, record the decision with a time and zone
+  that falls after the finding, so the finding counts as baseline.
+- **A verdict can hinge on one reading.** The floors are counts, so a window
+  with one bad reading on each side can clear them. One bad of 5 before and
+  one bad of 9 after is `holding`; one bad of 11 before and one bad of 9 after
+  is `not-holding`. Neither is wrong by the rules, and neither is strong
+  evidence. When either window has one bad reading or none, show the raw counts
+  with the verdict and treat it as a lead, not a finding. Raise the floors if
+  you need more.
+- **Key mismatches look like a young ledger.** Rows match only on exact
+  `subjectId` and `checkKey`. If every row differs by case, a trailing space or
+  a look-alike hyphen, the grade is refused with all four floor codes and zero
+  observations, the same output as a ledger with no history. The result does
+  not report how many rows you supplied or how many matched. If a refusal shows
+  0 observations in every window, compare your keys before you wait for more
+  data.
+- **No window end for superseded advice.** The post-decision window is every
+  matching observation after `decidedAt`. If a later recommendation replaced
+  this one, readings from the later period count against this one unless you
+  pass only the rows up to the replacement date.
 - **No deduplication.** Repeated observation rows and repeated pairs are
   counted each time. Deduplicate before calling if repeats are errors.
 - **Exact string matching.** `subjectId`, `checkKey`, judgments and
@@ -541,6 +647,11 @@ shipped `.d.ts` files.
 - **Non-string judgments are skipped, not rejected.** A pair whose
   `engineJudgment` or `humanJudgment` is missing, empty or not a string does
   not count as comparable (it still counts in `totalPairs`).
+- **Two judges, not specifically a human.** `computeDivergence` compares any
+  two strings from your own vocabulary, but the text from `describeDivergence`
+  says "the human" and "the engine". With two models, read those as the two
+  sides. With a two-value vocabulary (`keep` or `remove`) and outcomes in the
+  same two values, `neitherRight` stays 0.
 - **Disagreement is a place to look.** Divergence says one judge is wrong,
   not which one; that needs `laterOutcome`, and `calibration` refuses until
   enough outcomes exist.
