@@ -339,16 +339,20 @@ const day = (s) => Date.parse(`${s}T00:00:00Z`) // 'YYYY-MM-DD' as UTC midnight
 const iso = (ms) => new Date(ms).toISOString().slice(0, 10)
 
 // incidents: dates when the problem happened. from/to: the span you actually
-// watched. Buckets tile around decidedOn, so none of them straddles it.
+// watched. Buckets tile around decidedOn, so none of them straddles it, and
+// a bucket only counts when the whole bucket lies inside from..to.
 function bucketReadings({ incidents, decidedOn, from, to, subjectId, checkKey, bucketDays = 7 }) {
   const d0 = day(decidedOn)
   const bucketOf = (ms) => Math.floor((ms - d0) / (bucketDays * DAY)) // 0 starts on decidedOn
   const bad = new Set(incidents.map((d) => bucketOf(day(d))))
   const rows = []
   for (let b = bucketOf(day(from)); b <= bucketOf(day(to)); b++) {
+    const start = d0 + b * bucketDays * DAY
+    const last = start + (bucketDays - 1) * DAY
+    if (start < day(from) || last > day(to)) continue // not fully watched: no reading
     // Dated on the bucket's last day, so before-buckets fall before the decision
     // and after-buckets fall after it.
-    const observedAt = iso(d0 + ((b + 1) * bucketDays - 1) * DAY)
+    const observedAt = iso(last)
     const row = { subjectId, checkKey, observedAt, state: bad.has(b) ? 'bad' : 'good' }
     if (b >= 0) row.exposed = true // no exposure concept here; see "Exposure alignment"
     rows.push(row)
@@ -369,8 +373,8 @@ console.log(grade.verdict, grade.baseline, grade.result)
 What to settle before you trust the result:
 
 - **A quiet bucket is only `good` if you were watching.** Set `from` and `to` to
-  the span the log really covers. Outside it, no reading is better than an
-  invented `good`.
+  the span the log really covers. The recipe skips any bucket that is not
+  fully inside it, because no reading is better than an invented `good`.
 - **The bucket size changes the verdict.** The same dated incidents bucketed
   weekly, monthly or quarterly give different baselines, different counts and
   sometimes a different verdict. In one trial on a year of incident history
