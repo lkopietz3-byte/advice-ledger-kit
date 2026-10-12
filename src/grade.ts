@@ -94,11 +94,17 @@ const emptyWindow = (): WindowReading => ({ observations: 0, bad: 0, good: 0, ba
 
 /**
  * 'not-holding' when the window has at least `refuteThreshold` bad
- * observations, OR when its exact bad rate is higher than `baseline`'s,
- * even below that count. Otherwise 'holding'.
+ * observations, OR when its exact bad rate is higher than `baseline`'s, even
+ * below that count, OR when the baseline had bad observations and the
+ * window's exact rate is not strictly lower (a tie). Otherwise 'holding'.
  *
- * The rate check is exact (cross-multiplication in `rateHigherThan`), not a
- * comparison of the rounded `badRate` fields, so two rates that display the
+ * 'holding' therefore means the problem stayed away: the window's bad rate is
+ * strictly lower than a nonzero baseline rate, or both windows have no bad
+ * observation at all. An equal nonzero rate (3 of 4 before, 3 of 4 since) is
+ * the same problem at the same pace, which is not evidence the decision held.
+ *
+ * The rate checks are exact (cross-multiplication in `rateHigherThan`), not
+ * comparisons of the rounded `badRate` fields, so two rates that display the
  * same 3-place value but differ underneath still compare correctly. It never
  * returns 'refused': callers only reach this once the floors that make
  * `baseline` non-empty have already passed.
@@ -110,6 +116,16 @@ function verdictFor(
 ): DecisionVerdict {
   if (window.bad >= thresholds.refuteThreshold) return 'not-holding'
   if (rateHigherThan(window.bad, window.observations, baseline.bad, baseline.observations)) {
+    return 'not-holding'
+  }
+  // Neither higher nor count-refuted. With a nonzero baseline rate the window
+  // must be strictly lower to hold; an exact tie is not an improvement. With
+  // no bad observation in the baseline (only reachable with
+  // `minBaselineBadObservations: 0`) a window with none either stays holding.
+  if (
+    baseline.bad > 0 &&
+    !rateHigherThan(baseline.bad, baseline.observations, window.bad, window.observations)
+  ) {
     return 'not-holding'
   }
   return 'holding'
@@ -262,6 +278,13 @@ function readReading(row: Record<string, unknown>, index: number): Reading {
   if (typeof observedAt !== 'string' || observedAt.length === 0) {
     typeFail(`observations[${index}].observedAt must be a non-empty string, received ${describe(observedAt)}`)
   }
+  // `exposed` decides which rows reach the headline, so a value the type
+  // forbids ("true", 1, "yes") must not be quietly read as "not exposed",
+  // which would hide bad rows and could turn a failing decision into
+  // 'holding'. Only true, false and omitted are accepted.
+  if (exposed !== undefined && typeof exposed !== 'boolean') {
+    typeFail(`observations[${index}].exposed must be true, false or omitted, received ${describe(exposed)}`)
+  }
   return {
     bad: state === 'bad',
     instant: parseInstant(`observations[${index}].observedAt`, observedAt),
@@ -290,15 +313,20 @@ function secondaryFrom(window: WindowReading, wouldBeVerdict: DecisionVerdict): 
  *   dismissed + the problem stayed away  -> 'holding'      (the pass looks fine)
  *   dismissed + the problem came back    -> 'not-holding'  (the evidence sided with the advice)
  *
- * "The problem came back" means at least `refuteThreshold` bad observations in
- * the exposed post-decision window, OR the exposed bad rate is higher than
- * the baseline's, even below that count. The rate comparison is exact
+ * "The problem stayed away" means fewer than `refuteThreshold` bad
+ * observations in the exposed post-decision window AND an exposed bad rate
+ * strictly lower than the baseline's (or no bad observation in either window).
+ * "The problem came back" is everything else: at least `refuteThreshold` bad
+ * observations, OR an exposed bad rate higher than the baseline's even below
+ * that count, OR an equal nonzero rate (3 of 4 before and 3 of 4 since is no
+ * improvement). The rate comparison is exact
  * (cross-multiplication, see `rateHigherThan` in `internal.ts`), so it can
  * disagree with a comparison of the rounded `badRate` fields, or with the
  * sign of `badRateDelta`, right at a rounding boundary. Because the
  * post-decision window is every observation you pass, a long enough window
  * with any recurrence rate will eventually reach the count bar. Pass a
- * bounded window if that matters. Anything short of every floor being met
+ * bounded window if that matters; `describeGrade` says so when the count bar
+ * decides while the rate fell. Anything short of every floor being met
  * returns 'refused' with the specific codes attached, and no verdict at all.
  *
  * Pure: reads its inputs, never modifies them, and gives the same result for
@@ -317,7 +345,9 @@ function secondaryFrom(window: WindowReading, wouldBeVerdict: DecisionVerdict): 
  *   `+hh:mm`), or names a day that does not exist. Windows compare parsed
  *   instants, so `...T00:00:00Z`, `...T00:00:00.000Z` and `...T01:00:00+01:00`
  *   are the same moment.
- * @throws TypeError when `recommendation.id`, `recommendation.subjectId` or
+ * @throws TypeError when a matching observation has an `exposed` that is not
+ *   `true`, `false` or omitted (`"true"`, `1`, `null`), or when
+ *   `recommendation.id`, `recommendation.subjectId` or
  *   `decision.recommendationId` is not a string, `recommendation.basis` is
  *   present and not 'observed' or 'model-proposed', `decision.status` is not
  *   'adopted' or 'dismissed', `decision.decidedAt` is not a non-empty string,
@@ -468,6 +498,8 @@ export function gradeDecision(
   }
 }
 
+const capitalize = (sentence: string): string => sentence.charAt(0).toUpperCase() + sentence.slice(1)
+
 const CAUSE_LIMIT =
   'This is an association between two windows, not evidence that the recommendation caused the change.'
 
@@ -549,10 +581,11 @@ function describeRefusal(grade: DecisionGrade, where: string): string {
  * - A verdict reads "Holding: <check> on <subject> was bad in B of N
  *   observations before and b of n exposed observations since the
  *   recommendation was <status> on <decidedAt>." It then says which rule
- *   decided (the count reaching `refuteThreshold`, or the exact rate being
+ *   decided (the count reaching `refuteThreshold`, the exact rate being
  *   higher than the baseline's, with a note when both rates display the
- *   same) and that the reading is an association, not proof the
- *   recommendation caused anything.
+ *   same, or the exact rate being equal to a nonzero baseline's; when the
+ *   count decides while the rate fell, it says the rate fell) and that the
+ *   reading is an association, not proof the recommendation caused anything.
  * - A refusal for missing evidence reads "Not enough evidence to grade ...",
  *   then each floor with its actual and required count (before, after, and
  *   confirmed exposed after, plus bad-before when that floor failed), why it
@@ -578,18 +611,30 @@ export function describeGrade(grade: DecisionGrade): string {
   const count = `The exposed bad count (${text(r.bad)})`
   const refute = `the refute threshold (${text(thresholds.refuteThreshold)})`
   let reason: string
+  const rateSentence = `the exposed bad rate (${text(r.bad)} of ${text(r.observations)})`
+  const baselineRate = `the baseline's (${text(b.bad)} of ${text(b.observations)})`
   if (verdict === 'holding') {
     reason = `${count} is below ${refute} and its rate is not higher than the baseline's.`
   } else if (r.bad >= thresholds.refuteThreshold) {
     reason = `${count} reached ${refute}.`
-  } else {
-    // Only the exact rate rule can be responsible here. Two rates can round to
-    // the same 3-place display while the counts still differ.
+    // The count bar is fixed, so a long window with a falling rate can still
+    // reach it. Say so, so the reader sees the rate fell instead of reading
+    // only "reached".
+    if (rateHigherThan(b.bad, b.observations, r.bad, r.observations)) {
+      reason +=
+        ` ${capitalize(rateSentence)} is lower than ${baselineRate}, but the refute threshold is a fixed count that does not scale with the number of observations, so the count decides.`
+    }
+  } else if (rateHigherThan(r.bad, r.observations, b.bad, b.observations)) {
+    // The exact rate rule is responsible here. Two rates can round to the same
+    // 3-place display while the counts still differ.
     reason =
-      `${count} is below ${refute}, but the exposed bad rate (${text(r.bad)} of ${text(r.observations)}) is higher than the baseline's (${text(b.bad)} of ${text(b.observations)}), compared as exact counts.` +
+      `${count} is below ${refute}, but ${rateSentence} is higher than ${baselineRate}, compared as exact counts.` +
       (r.badRate !== null && r.badRate === b.badRate
         ? ` Both display as ${text(r.badRate)}; the exact counts decide, not the rounded display.`
         : '')
+  } else {
+    // Equal nonzero rate: below the count bar, but no improvement either.
+    reason = `${count} is below ${refute}, but ${rateSentence} is not lower than ${baselineRate}, compared as exact counts, so the problem did not go down.`
   }
   return `${head} ${reason} ${CAUSE_LIMIT}`
 }

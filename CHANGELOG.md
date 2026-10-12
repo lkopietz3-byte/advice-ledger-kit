@@ -4,6 +4,84 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [0.3.0] - unreleased
+
+Minor release with three behavior changes: one verdict change and two new
+`TypeError`s. The set of verdict values, the refusal codes, the JSON fields
+and the export names are unchanged. `honesty-mcp` (`grade_decision`,
+`compute_divergence`) needs to mirror them.
+
+### Breaking changes
+
+- **A tie in the bad rate is now `not-holding` (was `holding`).** When the
+  baseline has bad observations and the exposed window's bad rate is equal to
+  it (3 of 4 before and 3 of 4 since, or 1 of 3 against 1 of 3), `gradeDecision`
+  returns `not-holding`. Migration: no code change is needed because the value
+  already exists, but results that used to read `holding` for an exact tie now
+  read `not-holding`. Re-run any stored grades you display or alert on.
+- **A non-boolean `exposed` now throws a `TypeError`.** `"true"`, `1`, `"yes"`
+  or `null` on a matching observation used to be read as "not exposed". It now
+  throws, on baseline rows too. Migration: send `true`, `false` or omit the
+  key; convert strings and numbers at the boundary, and drop `null`.
+- **A non-string `laterOutcome` now throws a `TypeError` in
+  `computeDivergence`.** A number, boolean or `null` used to be read as "not
+  settled yet". Migration: omit the key or use `''` while a pair is unsettled,
+  and send the outcome as a string once it is known.
+
+### Fixed
+
+- **A tie in the bad rate was graded `holding`.** 3 of 4 bad before and 3 of 4
+  bad exposed since (with `refuteThreshold: 4`), or 1 of 3 against 1 of 3 with
+  the defaults, read as "the problem stayed away" when it had not gone down at
+  all. When the baseline has bad observations, the exposed window now has to
+  be strictly lower to hold; an equal rate is `not-holding`. The comparison is
+  still exact (cross-multiplied counts), so it also catches ties that display
+  the same rounded rate. `secondary.wouldBeVerdict` follows the same rule.
+  Zero bad before and zero bad since (reachable with
+  `minBaselineBadObservations: 0`) stays `holding`.
+- **A non-boolean `exposed` was read as "not exposed".** It could hide bad rows
+  and turn a failing decision into `holding` (see Breaking changes).
+- **A non-string `laterOutcome` was read as "not settled yet".** It shrank the
+  resolved count and hid who was right (see Breaking changes).
+
+### Changed
+
+- `describeGrade`: a tie reads "the exposed bad rate (1 of 3) is not lower than
+  the baseline's (1 of 3), compared as exact counts, so the problem did not go
+  down." When the count bar decides while the exposed rate is lower than the
+  baseline's (6 of 6 before, 2 of 60 since), the sentence now says the rate
+  fell and that the refute threshold is a fixed count. The sentence for a
+  `holding` grade and the JSON are unchanged. Match on the JSON, not the text.
+
+### Documented
+
+- The README now says who the kit fits (a log with dated `good` and `bad`
+  readings of the same check on the same subject, before and after a decision)
+  and who it does not (decision records with no observations, event logs as
+  they are), and adds a tested recipe for turning an event log into readings,
+  with a warning that the bucket size can change the verdict.
+- New entries in the honest limits: a verdict can hinge on one reading; a
+  same-day find and fix on date-only data sits on the boundary and can refuse;
+  a key mismatch looks like a young ledger; advice that was replaced has no
+  window end; timestamp formats from git and Python need reformatting first;
+  `computeDivergence` text says "the human" and "the engine" for any two
+  judges. The divergence refusal codes are listed.
+- The refute bar is a fixed count, not a rate, so a long window can reach it
+  while the bad rate falls sharply (6 of 6 before, 2 of 60 since is
+  `not-holding`). This is deliberate and stated in the README and
+  `ENGINEERING.md`, with the advice to bound the window or raise
+  `refuteThreshold`.
+- A date-only `decidedAt` is UTC midnight, so for a caller west of UTC the
+  previous local evening counts as after the decision (worked example in the
+  README).
+- Text in different Unicode forms (NFC and NFD) compares as different in
+  `computeDivergence`; normalize labels first.
+- A non-string `engineJudgment` or `humanJudgment` makes a pair not
+  comparable rather than throwing.
+- `exposed` and `laterOutcome` are type-checked but their values are trusted.
+
 ## [0.2.1] - 2026-10-07
 
 No change to the library's behavior or API.

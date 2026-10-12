@@ -118,6 +118,10 @@ export interface Observation {
    *
    * On observations BEFORE the decision, this flag is ignored — the advice was
    * not in force yet, so there is nothing it could have been exposed to.
+   *
+   * Only `true`, `false` and omitted are accepted on a matching observation.
+   * Anything else (`"true"`, `1`, `"yes"`, `null`) throws a `TypeError`, on a
+   * baseline row too, instead of being read as not exposed.
    */
   exposed?: boolean
 }
@@ -129,13 +133,17 @@ export interface Observation {
 /**
  * 'holding'     — every floor is met, the exposed post-decision window has
  *                 fewer than `refuteThreshold` bad observations, AND its bad
- *                 rate is not higher than the baseline's.
- * 'not-holding' — every floor is met and EITHER the exposed post-decision
- *                 window has at least `refuteThreshold` bad observations, OR
+ *                 rate is strictly lower than the baseline's (or neither
+ *                 window has a bad observation, which needs
+ *                 `minBaselineBadObservations: 0`).
+ * 'not-holding' — every floor is met and the window is not holding: EITHER
+ *                 it has at least `refuteThreshold` bad observations, OR
  *                 its bad rate is higher than the baseline's, even below
  *                 that count (1 of 10 before, 1 of 3 exposed since is
  *                 `not-holding`, not `holding`, despite the count staying
- *                 under the default bar of 2).
+ *                 under the default bar of 2), OR its bad rate equals a
+ *                 nonzero baseline rate (1 of 3 before, 1 of 3 since: the
+ *                 problem did not go down).
  * 'refused'     — a floor or a structural check failed. Read `refusalCodes`.
  *
  * The rate comparison is exact: it cross-multiplies the raw counts
@@ -318,14 +326,20 @@ export interface DecisionGrade {
  * are compared by exact equality (case and whitespace included), so use one
  * canonical spelling per judgment. A judgment that is missing, empty, or not
  * a string counts as "did not speak"; a whitespace-only string counts as a
- * judgment. A missing or empty `laterOutcome` means "not settled yet".
+ * judgment. A missing or empty `laterOutcome` means "not settled yet"; any
+ * other non-string `laterOutcome` (a number, boolean or `null`) is a
+ * `TypeError`, because it cannot be told apart from a settled outcome that
+ * was mistyped.
  */
 export interface JudgmentPair {
   /** What the system said. */
   engineJudgment: string
   /** What the human said. */
   humanJudgment: string
-  /** What actually turned out to be the case, when that is known yet. */
+  /**
+   * What actually turned out to be the case, when that is known yet. Omit it
+   * (or use `''`) while unsettled; `null` and other non-strings throw.
+   */
   laterOutcome?: string
   /** Optional bucket, used by the default `groupBy`. */
   group?: string

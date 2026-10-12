@@ -208,7 +208,9 @@ function reportFor(
  * @param config - floors and the optional `groupBy`. See `resolveDivergenceConfig`.
  * @throws RangeError from `resolveDivergenceConfig`.
  * @throws TypeError when `pairs` is not an array, has a hole, or holds
- *   anything but plain objects; when `config` is not a plain object; when
+ *   anything but plain objects; when a pair's `laterOutcome` is present and
+ *   not a string (a number, boolean or `null`; omit it or use an empty string
+ *   for "not settled yet"); when `config` is not a plain object; when
  *   `groupBy` is present and not a function; or when `groupBy` returns
  *   something other than a string, `null` or `undefined` (a promise is not
  *   awaited and is rejected the same way).
@@ -236,6 +238,12 @@ export function computeDivergence(
     // values read here, so nothing done to the copy afterwards can change them.
     const pair = { ...source } as unknown as JudgmentPair
     const { engineJudgment, humanJudgment, laterOutcome } = pair
+    // A `laterOutcome` the type forbids (1, true, null) would otherwise be
+    // read as "not settled yet", quietly shrinking the resolved count and
+    // hiding who was right. Only a string or an omitted value is accepted.
+    if (laterOutcome !== undefined && typeof laterOutcome !== 'string') {
+      typeFail(`pairs[${index}].laterOutcome must be a string or omitted, received ${describe(laterOutcome)}`)
+    }
     entries.push({ pair, engine: engineJudgment, human: humanJudgment, outcome: laterOutcome })
   }
 

@@ -8,9 +8,13 @@
   `secondary` is labeled non-headline and its `wouldBeVerdict` applies the
   same floors.
 - `holding` requires both a count below `refuteThreshold` AND an exposed bad
-  rate not higher than the baseline's; either failing gives `not-holding`.
-  The rate check cross-multiplies the raw counts, never the rounded `badRate`
-  or `badRateDelta` fields.
+  rate strictly lower than the baseline's; either failing gives
+  `not-holding`. The one exception is a baseline with no bad observation
+  (`minBaselineBadObservations: 0`): an exposed window with none either is
+  `holding`. An equal nonzero rate is a tie and is `not-holding` (decided
+  2026-10-10 to keep the verdict set `holding`, `not-holding`, `refused`
+  unchanged). The rate checks cross-multiply the raw counts, never the
+  rounded `badRate` or `badRateDelta` fields.
 - `refuteThreshold >= proposeThreshold`, or `resolveGradeConfig` throws.
 - Divergence needs the comparable-pair, count and rate floors; the rate floor
   uses the exact ratio, never the rounded display rate.
@@ -46,7 +50,7 @@ Mutation testing is run by hand, not in CI: `npm i -D --no-save
 @stryker-mutator/core @stryker-mutator/vitest-runner` and a local
 `stryker.config.json` (not committed) with the vitest runner and
 `mutate: ["src/**/*.ts"]`. At 0.2.0 it scored 100% (867 killed, none
-survived); v8 coverage is 100% of lines.
+survived). It was not rerun for 0.3.0, so treat that score as a 0.2.0 number.
 
 `verify:package` packs the tarball, installs it into an empty project,
 checks the exported names against `api-surface.json`, runs
@@ -55,7 +59,7 @@ checks the exported names against `api-surface.json`, runs
 `test/reference.test.ts` compares both engines with a naive reference
 implementation on seeded random inputs.
 
-## What is not certified
+## What this does not cover
 
 - No statistical inference: floors are minimum counts, not significance
   tests or intervals. Results are associations, not causal effects.
@@ -63,7 +67,11 @@ implementation on seeded random inputs.
   guessed, and a bare date is UTC midnight. A source that exported local time
   without a zone must be converted before calling.
 - No deduplication of observations or pairs.
-- `exposed` and `laterOutcome` are trusted as given.
+- `exposed` and `laterOutcome` are type-checked (a boolean and a string; other
+  types throw) but their values are trusted as given.
+- The refute bar is a fixed count, not a rate, so a long window can reach it
+  while the bad rate falls. This is deliberate; `describeGrade` reports the
+  rate drop.
 
 ## Are the types wrong? (attw)
 
@@ -71,7 +79,7 @@ CI runs [`arethetypeswrong`](https://github.com/arethetypeswrong/arethetypeswron
 (`npm run attw`, which is `attw --pack . --ignore-rules cjs-resolves-to-esm`)
 against the packed tarball after the build step. The `cjs-resolves-to-esm` rule is ignored on
 purpose: this is an ESM-only package (`"type": "module"`, no `require` entry point), so a
-CommonJS consumer must use Node's `require(esm)` support (Node >=20.19 or >=22.12 — see
+CommonJS consumer must use Node's `require(esm)` support (Node >=20.19 or >=22.12; see
 "Runtime support policy" below) rather than a native `require`. A dual CJS+ESM build was
 rejected to avoid the dual-package hazard (two separately-identified copies of the same module,
 with broken `instanceof` checks and duplicated module state across the CJS and ESM entry
@@ -88,7 +96,7 @@ also run `npm publish` locally; `prepublishOnly` still guards it.)
 
 npm's unpublish policy is deliberately narrow. Within 72 hours of publishing, a version can be
 unpublished only if no other published package depends on it. After 72 hours, unpublishing also
-requires fewer than 300 downloads in the last week and a single maintainer — most released
+requires fewer than 300 downloads in the last week and a single maintainer, and most released
 versions won't qualify either way. A given `name@version` can never be reused, published or
 not, even after an unpublish. Treat unpublish as unavailable: prefer fixing forward with a new
 patch version, and use `npm deprecate <name>@"<range>" "<message>"` to warn consumers off a
@@ -96,13 +104,15 @@ bad release while it stays installable for anyone already pinned to it.
 
 A change to a refusal code, verdict rule, timestamp rule, input validation or sentence
 format affects `honesty-mcp` (`grade_decision`, `compute_divergence`); note it in the
-changelog. 0.2.0 changed all of these; `honesty-mcp` must mirror them (its `decidedAt`
-and `observedAt` schemas and tool descriptions still say dates compare as strings).
+changelog. 0.2.0 and 0.3.0 changed several of these (instant parsing and strict
+input in 0.2.0; ties, `exposed` and `laterOutcome` type checks in 0.3.0);
+`honesty-mcp` must mirror them, including its `decidedAt` and `observedAt`
+schemas and tool descriptions.
 
 ### Runtime support policy
 
 - **Supported (recommended for production):** Node 22 and 24 LTS; Node 26 current.
-- **Compatibility-tested:** Node 20. Node 20 is end-of-life — nodejs.org's release page
+- **Compatibility-tested:** Node 20. Node 20 is end-of-life; nodejs.org's release page
   (<https://nodejs.org/en/about/previous-releases>) lists it as `EOL`, with its final release
   dated Mar 24, 2026. The `compat` job in `verify.yml` still runs on Node 20 to catch
   regressions, but that runtime gets no security fixes upstream; don't run production traffic
