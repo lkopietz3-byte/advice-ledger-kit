@@ -14,7 +14,7 @@ change: the exports, verdicts, refusal codes and JSON fields are the same as
 (`evidencekit/advice-ledger`) and the prefix on error messages, which now
 reads `@evidencekit/advice-ledger:` instead of `advice-ledger-kit:`.
 
-## [0.3.0] - unreleased
+## [0.3.0] - 2026-10-12
 
 Minor release with three behavior changes: one verdict change and two new
 `TypeError`s. The set of verdict values, the refusal codes, the JSON fields
