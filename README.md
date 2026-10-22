@@ -1,6 +1,8 @@
-# advice-ledger-kit
+# @evidencekit/advice-ledger
 
-**[Try it in your browser →](https://lkopietz3-byte.github.io/honesty-kits/#advice-ledger-kit)** · Part of [honesty kits](https://github.com/lkopietz3-byte/honesty-kits), a family of small checks for the claims an AI product makes.
+**[Try it in your browser →](https://evidencekit.github.io/#advice-ledger)** · Part of Evidence Kit: checks that tie AI output and public claims back to their evidence.
+
+Formerly published as `advice-ledger-kit`.
 
 A small, zero-dependency TypeScript library for checking a recommender
 against what happened after people acted on its advice. It has two parts:
@@ -46,7 +48,7 @@ You get a grade that refuses rather than guesses when the log is thin.
 ## Install
 
 ```bash
-npm install advice-ledger-kit
+npm install @evidencekit/advice-ledger
 ```
 
 Or build from source: clone the repository and run `npm install && npm run build`.
@@ -57,8 +59,8 @@ load it. `require()` also works where Node can `require(esm)`:
 
 | How you load it | Node 20.19+ | Node 22.12+ | Node 24 and 26 | Older Node 20 or 22 |
 | --- | --- | --- | --- | --- |
-| `import { gradeDecision } from 'advice-ledger-kit'` | works | works | works | works |
-| `require('advice-ledger-kit')` | works | works | works | fails (no `require(esm)`); use `import()` |
+| `import { gradeDecision } from '@evidencekit/advice-ledger'` | works | works | works | works |
+| `require('@evidencekit/advice-ledger')` | works | works | works | fails (no `require(esm)`); use `import()` |
 
 Recommended runtimes are Node 22 and 24 (LTS) and Node 26 (current). Node 20 is
 end-of-life. CI still runs the tests on Node 20.19.0 and 22.12.0 (the
@@ -72,7 +74,7 @@ re-torque. The technician adopted it on February 1. Each later inspection
 records whether the re-torque was actually done that week (`exposed`).
 
 ```js
-import { gradeDecision, describeGrade, computeDivergence, describeDivergence } from 'advice-ledger-kit'
+import { gradeDecision, describeGrade, computeDivergence, describeDivergence } from '@evidencekit/advice-ledger'
 
 const recommendation = { id: 'rec-88', subjectId: 'pump-14', checkKey: 'seal-leak', proposedAt: '2026-01-18' }
 const decision = { recommendationId: 'rec-88', status: 'adopted', decidedAt: '2026-02-01' }
@@ -690,7 +692,7 @@ This library does not claim the idea is new. Closely related work:
 
 ## Related
 
-[honesty-mcp](https://github.com/lkopietz3-byte/honesty-mcp) exposes this
+[@evidencekit/mcp](https://github.com/evidencekit/mcp) exposes this
 kit to MCP clients as two tools, `grade_decision` (wraps `gradeDecision`)
 and `compute_divergence` (wraps `computeDivergence`).
 

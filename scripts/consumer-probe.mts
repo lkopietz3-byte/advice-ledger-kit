@@ -26,7 +26,7 @@ import {
   type ResolvedGradeConfig,
   type SecondaryReading,
   type WindowReading,
-} from 'advice-ledger-kit';
+} from '@evidencekit/advice-ledger';
 
 const recommendation: Recommendation = { id: 'r', subjectId: 's', checkKey: 'c', proposedAt: '2026-01-01', basis: 'observed' };
 const decision: Decision = { recommendationId: 'r', status: 'dismissed', decidedAt: '2026-02-01' };

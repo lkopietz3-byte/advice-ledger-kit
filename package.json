@@ -1,6 +1,6 @@
 {
-  "name": "advice-ledger-kit",
-  "version": "0.3.0",
+  "name": "@evidencekit/advice-ledger",
+  "version": "0.3.1",
   "description": "Grade decisions on a recommender's advice against later observations, refusing with machine-readable codes when before/after or exposure floors are not met, and measure engine-versus-human disagreement with engine-right and human-right counts kept separate.",
   "keywords": [
     "recommendation-evaluation",
@@ -12,17 +12,22 @@
     "inter-rater-disagreement",
     "refusal-codes",
     "typescript",
-    "honesty-kits"
+    "advice-ledger-kit",
+    "evidence-kit"
   ],
   "author": "Lucas Kopietz",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lkopietz3-byte/advice-ledger-kit.git"
+    "url": "git+https://github.com/evidencekit/advice-ledger.git"
   },
-  "homepage": "https://lkopietz3-byte.github.io/honesty-kits/#advice-ledger-kit",
+  "homepage": "https://github.com/evidencekit/advice-ledger#readme",
   "bugs": {
-    "url": "https://github.com/lkopietz3-byte/advice-ledger-kit/issues"
+    "url": "https://github.com/evidencekit/advice-ledger/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "type": "module",
   "main": "./dist/index.js",

@@ -1,4 +1,4 @@
-// Core types for advice-ledger-kit.
+// Core types for @evidencekit/advice-ledger.
 //
 // The pattern: a system makes a recommendation, a human accepts or rejects it,
 // and reality later shows who was right. It is common to record the first two

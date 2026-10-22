@@ -1,4 +1,4 @@
-// advice-ledger-kit — grade the grader.
+// @evidencekit/advice-ledger — grade the grader.
 //
 // A system makes recommendations, a human accepts or rejects them, and reality
 // later shows who was right. This library closes that loop honestly: it

@@ -11,7 +11,7 @@ import {
   gradeDecision,
   resolveDivergenceConfig,
   resolveGradeConfig,
-} from 'advice-ledger-kit';
+} from '@evidencekit/advice-ledger';
 
 // --- gradeDecision: the README quickstart ----------------------------------
 const recommendation = { id: 'rec-88', subjectId: 'pump-14', checkKey: 'seal-leak', proposedAt: '2026-01-18' };

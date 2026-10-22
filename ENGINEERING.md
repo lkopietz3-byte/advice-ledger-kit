@@ -103,10 +103,10 @@ patch version, and use `npm deprecate <name>@"<range>" "<message>"` to warn cons
 bad release while it stays installable for anyone already pinned to it.
 
 A change to a refusal code, verdict rule, timestamp rule, input validation or sentence
-format affects `honesty-mcp` (`grade_decision`, `compute_divergence`); note it in the
+format affects `@evidencekit/mcp` (`grade_decision`, `compute_divergence`); note it in the
 changelog. 0.2.0 and 0.3.0 changed several of these (instant parsing and strict
 input in 0.2.0; ties, `exposed` and `laterOutcome` type checks in 0.3.0);
-`honesty-mcp` must mirror them, including its `decidedAt` and `observedAt`
+`@evidencekit/mcp` must mirror them, including its `decidedAt` and `observedAt`
 schemas and tool descriptions.
 
 ### Runtime support policy

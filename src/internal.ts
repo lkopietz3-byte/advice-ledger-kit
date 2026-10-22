@@ -5,7 +5,7 @@
 export function requireCount(name: string, value: number, minimum: number): number {
   if (!Number.isInteger(value) || value < minimum) {
     throw new RangeError(
-      `advice-ledger-kit: ${name} must be an integer >= ${minimum}, received ${describe(value)}`,
+      `@evidencekit/advice-ledger: ${name} must be an integer >= ${minimum}, received ${describe(value)}`,
     )
   }
   return value
@@ -48,7 +48,7 @@ export function rateHigherThan(bad1: number, whole1: number, bad2: number, whole
 
 /** Throw a TypeError with the package prefix. */
 export function typeFail(message: string): never {
-  throw new TypeError(`advice-ledger-kit: ${message}`)
+  throw new TypeError(`@evidencekit/advice-ledger: ${message}`)
 }
 
 // Control characters (Cc), format characters such as the bidi controls
@@ -141,7 +141,7 @@ export function denseCopy(name: string, value: unknown): unknown[] {
   return copy
 }
 
-// One grammar for every `decidedAt` and `observedAt`, the same one freshness-kit
+// One grammar for every `decidedAt` and `observedAt`, the same one @evidencekit/freshness
 // uses for its review dates: a calendar date (read as UTC midnight) or a
 // timestamp with seconds and an explicit zone. Anything else is rejected
 // instead of being compared as text.
@@ -162,7 +162,7 @@ export function parseInstant(name: string, value: string): number {
   const match = INSTANT_GRAMMAR.exec(value)
   if (!match) {
     throw new RangeError(
-      `advice-ledger-kit: ${name} must be a date (YYYY-MM-DD, read as UTC midnight) or a timestamp with seconds and an explicit zone (Z or +hh:mm), received ${describe(value)}`,
+      `@evidencekit/advice-ledger: ${name} must be a date (YYYY-MM-DD, read as UTC midnight) or a timestamp with seconds and an explicit zone (Z or +hh:mm), received ${describe(value)}`,
     )
   }
   const year = Number(match[1])
@@ -172,7 +172,7 @@ export function parseInstant(name: string, value: string): number {
   const daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
   if (month < 1 || month > 12 || day < 1 || day > (daysInMonth[month - 1] as number)) {
     throw new RangeError(
-      `advice-ledger-kit: ${name} must be a date that exists on the calendar (not 2026-02-30 or month 13), received ${describe(value)}`,
+      `@evidencekit/advice-ledger: ${name} must be a date that exists on the calendar (not 2026-02-30 or month 13), received ${describe(value)}`,
     )
   }
   // A date-only ISO string is UTC midnight by definition, and the grammar

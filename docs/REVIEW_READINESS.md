@@ -14,7 +14,7 @@ Reported historical observation (September 30, 2026): this repository followed p
 
 ## Next preparation task
 
-honesty-mcp 0.2.0 already declares advice-ledger-kit ^0.2.0 and ships grade_decision and compute_divergence wrappers. Keep an installed-consumer regression example for zoned timestamp boundaries, floor refusals, headline versus secondary outcomes and separate engine/human counts as either package changes.
+`@evidencekit/mcp` (formerly honesty-mcp) 0.2.0 already declares advice-ledger-kit ^0.2.0 and ships grade_decision and compute_divergence wrappers. Keep an installed-consumer regression example for zoned timestamp boundaries, floor refusals, headline versus secondary outcomes and separate engine/human counts as either package changes.
 
 Finish condition: On a future candidate, a clean installed consumer exercises those cases and its tool descriptions agree with the resolved package APIs. Passing this repository's checks alone does not prove the cross-package behavior.
 

@@ -6,6 +6,14 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-22
+
+Renamed from `advice-ledger-kit` to `@evidencekit/advice-ledger`. No behavior
+change: the exports, verdicts, refusal codes and JSON fields are the same as
+0.3.0. The only visible differences are the package name, the repository
+(`evidencekit/advice-ledger`) and the prefix on error messages, which now
+reads `@evidencekit/advice-ledger:` instead of `advice-ledger-kit:`.
+
 ## [0.3.0] - unreleased
 
 Minor release with three behavior changes: one verdict change and two new

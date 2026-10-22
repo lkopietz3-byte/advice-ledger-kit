@@ -74,7 +74,7 @@ export function resolveDivergenceConfig(config: DivergenceConfig = {}): Resolved
   const minDivergentRate = given.minDivergentRate ?? d.minDivergentRate
   if (!Number.isFinite(minDivergentRate) || minDivergentRate < 0 || minDivergentRate > 1) {
     throw new RangeError(
-      `advice-ledger-kit: minDivergentRate must be a number between 0 and 1, received ${describe(minDivergentRate)}`,
+      `@evidencekit/advice-ledger: minDivergentRate must be a number between 0 and 1, received ${describe(minDivergentRate)}`,
     )
   }
   return {

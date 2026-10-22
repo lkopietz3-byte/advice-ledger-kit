@@ -166,7 +166,7 @@ export function resolveGradeConfig(config: GradeConfig = {}): ResolvedGradeConfi
   )
   if (refuteThreshold < proposeThreshold) {
     throw new RangeError(
-      `advice-ledger-kit: refuteThreshold (${refuteThreshold}) is below proposeThreshold (${proposeThreshold}). ` +
+      `@evidencekit/advice-ledger: refuteThreshold (${refuteThreshold}) is below proposeThreshold (${proposeThreshold}). ` +
         'Overturning a decision must never take less evidence than making the recommendation took. ' +
         'Raise refuteThreshold to at least proposeThreshold, or lower proposeThreshold to match what the proposal really required.',
     )
