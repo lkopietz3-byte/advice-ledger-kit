@@ -427,7 +427,7 @@ describe('computeDivergence against a naive reference implementation', () => {
         }
       }
     }
-  })
+  }, 30_000) // a deterministic loop of about 15,000 grading calls; slow on a busy runner, never time-asserted
 
   it('gives the same counts for any order of pairs, keeps examples in input order, and never modifies inputs', () => {
     const r = makeRandom(99)
