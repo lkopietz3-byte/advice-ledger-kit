@@ -1,7 +1,7 @@
 {
   "name": "advice-ledger-kit",
-  "version": "0.3.0",
-  "description": "Grade decisions on a recommender's advice against later observations, refusing with machine-readable codes when before/after or exposure floors are not met, and measure engine-versus-human disagreement with engine-right and human-right counts kept separate.",
+  "version": "0.3.1",
+  "description": "Compare outcomes before and after someone follows advice. Track separately when the system or the person was right.",
   "keywords": [
     "recommendation-evaluation",
     "decision-log",
